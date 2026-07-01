@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+set -euo pipefail
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
+
+checks_passed=0
+checks_failed=0
+
+# --- shellcheck ---
+staged_sh="$(git diff --cached --name-only --diff-filter=ACM | grep '\.sh$' || true)"
+if [[ -n "$staged_sh" ]]; then
+    echo ":: shellcheck on staged .sh files..."
+    if echo "$staged_sh" | xargs -r shellcheck 2>&1; then
+        echo -e "${GREEN}   shellcheck passed${NC}"
+        ((checks_passed += 1))
+    else
+        echo -e "${RED}   shellcheck FAILED${NC}"
+        ((checks_failed += 1))
+    fi
+else
+    echo ":: no staged .sh files, skipping shellcheck"
+fi
+
+# --- actionlint ---
+staged_actions="$(git diff --cached --name-only --diff-filter=ACM | grep '^\.github/workflows/.*\.yml$' || true)"
+if [[ -n "$staged_actions" ]]; then
+    echo ":: actionlint on staged workflow files..."
+    if echo "$staged_actions" | xargs -r actionlint 2>&1; then
+        echo -e "${GREEN}   actionlint passed${NC}"
+        ((checks_passed += 1))
+    else
+        echo -e "${RED}   actionlint FAILED${NC}"
+        ((checks_failed += 1))
+    fi
+elif [[ -d .github/workflows ]]; then
+    echo ":: actionlint on all workflow files..."
+    if actionlint 2>&1; then
+        echo -e "${GREEN}   actionlint passed${NC}"
+        ((checks_passed += 1))
+    else
+        echo -e "${RED}   actionlint FAILED${NC}"
+        ((checks_failed += 1))
+    fi
+else
+    echo ":: no .github/workflows directory, skipping actionlint"
+fi
+
+# --- summary ---
+if (( checks_failed > 0 )); then
+    echo -e "${RED}${checks_failed} check(s) failed, aborting commit${NC}"
+    exit 1
+fi
