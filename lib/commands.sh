@@ -23,6 +23,7 @@ Commands:
   restart                       Restart containers.
   renew                         Renew certificates immediately.
   status                        Show current installation status.
+  setup                         Configure deployment interactively (FHS mode).
   init                          Re-initialize runtime artifacts (regenerate certs, restart).
   service-install               Install and enable timer/service for certificate renewal.
   service-remove                Remove renewal timer/service.
@@ -297,44 +298,47 @@ dispatch_command() {
     fi
 
     case "$COMMAND" in
+        setup)
+            CURRENT_COMMAND="setup"
+            check_core_requirements
+            bootstrap_installation
+            ;;
         start)
             CURRENT_COMMAND="start"
-            require_docker_access
+            check_core_requirements
             ensure_config_loaded
             start_containers
             ;;
         stop)
             CURRENT_COMMAND="stop"
-            require_docker_access
+            check_core_requirements
             ensure_config_loaded
             stop_containers
             ;;
         restart)
             CURRENT_COMMAND="restart"
-            require_docker_access
+            check_core_requirements
             ensure_config_loaded
             restart_containers
             ;;
         renew)
             CURRENT_COMMAND="renew"
-            require_docker_access
+            check_core_requirements
             ensure_config_loaded
-            check_requirements
             renew_certificate
             ;;
         renew-now)
             log_warn "renew-now is deprecated; use 'renew' instead"
             CURRENT_COMMAND="renew"
-            require_docker_access
+            check_core_requirements
             ensure_config_loaded
-            check_requirements
             renew_certificate
             ;;
         init)
             CURRENT_COMMAND="init"
-            require_docker_access
+            check_core_requirements
+            [[ "$CERT_MODE" != "selfsigned" ]] || require_command openssl
             ensure_config_loaded
-            check_requirements
             initialize_runtime_artifacts
             ;;
         status)
@@ -359,21 +363,18 @@ dispatch_command() {
             ;;
         update)
             CURRENT_COMMAND="update"
-            require_docker_access
+            check_core_requirements
             ensure_config_loaded
-            check_requirements
             update_containers
             ;;
         cleanup)
             CURRENT_COMMAND="cleanup"
-            require_docker_access
-            require_command docker
+            check_core_requirements
             cleanup_docker_artifacts
             ;;
         cleanup-all)
             CURRENT_COMMAND="cleanup-all"
-            require_docker_access
-            require_command docker
+            check_core_requirements
             cleanup_docker_artifacts 1
             ;;
         uninstall)

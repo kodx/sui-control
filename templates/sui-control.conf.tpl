@@ -1,11 +1,12 @@
-domain=$(sanitize_conf_value "$DOMAIN")
-tz=$(sanitize_conf_value "$TZ")
-timer_on_calendar=$(sanitize_conf_value "$TIMER_ON_CALENDAR")
-timer_random_delay=$(sanitize_conf_value "$TIMER_RANDOM_DELAY")
-cert_mode=$(sanitize_conf_value "$CERT_MODE")
-self_signed_days=$(sanitize_conf_value "$SELF_SIGNED_DAYS")
-panel_port=$(sanitize_conf_value "$SUI_PANEL_PORT")
-subscription_port=$(sanitize_conf_value "$SUI_SUBSCRIPTION_PORT")
-panel_path=$(sanitize_conf_value "$SUI_PANEL_PATH")
-subscription_path=$(sanitize_conf_value "$SUI_SUBSCRIPTION_PATH")
-init_system=$(sanitize_conf_value "$INIT_SYSTEM")
+# sui-control configuration — auto-generated
+domain=${DOMAIN}
+tz=${TZ}
+timer_on_calendar=${TIMER_ON_CALENDAR}
+timer_random_delay=${TIMER_RANDOM_DELAY}
+cert_mode=${CERT_MODE}
+self_signed_days=${SELF_SIGNED_DAYS}
+panel_port=${SUI_PANEL_PORT}
+subscription_port=${SUI_SUBSCRIPTION_PORT}
+panel_path=${SUI_PANEL_PATH}
+subscription_path=${SUI_SUBSCRIPTION_PATH}
+init_system=${INIT_SYSTEM}

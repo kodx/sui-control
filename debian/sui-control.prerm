@@ -1,0 +1,32 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    remove|upgrade|deconfigure)
+        if command -v systemctl >/dev/null; then
+            systemctl disable --now sui-control-renew.timer >/dev/null 2>&1 || true
+            systemctl disable --now sui-control.service >/dev/null 2>&1 || true
+        fi
+        rm -f /etc/systemd/system/sui-control.service \
+              /etc/systemd/system/sui-control-renew.service \
+              /etc/systemd/system/sui-control-renew.timer
+
+        [ -f /etc/cron.d/sui-control-renew ] && rm -f /etc/cron.d/sui-control-renew
+
+        [ -f /etc/init.d/sui-control ] && {
+            command -v rc-update >/dev/null && \
+                rc-update del sui-control default >/dev/null 2>&1 || true
+            rm -f /etc/init.d/sui-control
+        }
+
+        [ -L /etc/service/sui-control ] && rm -f /etc/service/sui-control
+        [ -d /etc/sv/sui-control ] && rm -rf /etc/sv/sui-control
+        [ -d /etc/s6/sui-control ] && rm -rf /etc/s6/sui-control
+
+        [ -f /etc/dinit.d/sui-control ] && {
+            command -v dinitctl >/dev/null && \
+                dinitctl disable sui-control >/dev/null 2>&1 || true
+            rm -f /etc/dinit.d/sui-control
+        }
+        ;;
+esac

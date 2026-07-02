@@ -23,6 +23,14 @@ resolve_layout() {
 }
 
 # ----------------------------------------------------------------------
+# Core requirement checks
+# ----------------------------------------------------------------------
+check_core_requirements() {
+    require_command docker stat
+    docker compose version >/dev/null 2>&1 || die "docker compose plugin is required"
+}
+
+# ----------------------------------------------------------------------
 # Privilege escalation
 # ----------------------------------------------------------------------
 maybe_escalate_privileges() {
@@ -40,16 +48,6 @@ maybe_escalate_privileges() {
 
 require_root() {
     [[ "$(id -u)" -eq 0 ]] || die "This command must be run as root"
-}
-
-require_docker_access() {
-    if ! docker info >/dev/null 2>&1; then
-        if groups "$SUI_CONTROL_USER" 2>/dev/null | grep -qw docker; then
-            die "Docker daemon is not running or not reachable"
-        else
-            die "Docker access is required. Add $SUI_CONTROL_USER to docker group: sudo usermod -aG docker $SUI_CONTROL_USER"
-        fi
-    fi
 }
 
 # ----------------------------------------------------------------------
@@ -113,10 +111,13 @@ is_ipv6() {
     local s="$1" part colons
     [[ -n "$s" ]] || return 1
     [[ "$s" =~ ^[0-9a-fA-F:]+$ ]] || return 1
-    [[ "$s" == *::* ]] || return 1
     [[ "$s" != *:::* ]] || return 1
     colons="${s//[^:]/}"
-    (( ${#colons} <= 7 )) || return 1
+    if [[ "$s" == *::* ]]; then
+        (( ${#colons} <= 7 )) || return 1
+    else
+        (( ${#colons} == 7 )) || return 1
+    fi
     IFS=':' read -r -a parts <<< "$s"
     for part in "${parts[@]}"; do
         [[ -z "$part" || ${#part} -le 4 ]] || return 1

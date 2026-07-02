@@ -1,0 +1,8 @@
+lib/constants.sh usr/lib/sui-control/lib/
+lib/utils.sh     usr/lib/sui-control/lib/
+lib/actions.sh   usr/lib/sui-control/lib/
+lib/commands.sh  usr/lib/sui-control/lib/
+templates/*      usr/lib/sui-control/templates/
+sui-control.sh   usr/lib/sui-control/
+VERSION          usr/lib/sui-control/
+LICENSE          usr/lib/sui-control/

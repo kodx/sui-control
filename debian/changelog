@@ -1,0 +1,5 @@
+sui-control (1.4.0-1) stable; urgency=medium
+
+  * Initial release for Debian packaging.
+
+ -- kodx <dev@kodx.org>  Fri, 03 Jul 2026 12:00:00 +0300

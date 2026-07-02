@@ -56,7 +56,7 @@ COLOR_ERROR='\033[0;31m'
 COLOR_RESET='\033[0m'
 
 # --- Runtime state ---
-SCRIPT_ARG0="$0"
+SCRIPT_ARG0="$(readlink -f "$0")"
 SCRIPT_PATH=""
 PACKAGE_DIR=""
 CURRENT_COMMAND=""

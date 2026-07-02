@@ -1,0 +1,24 @@
+Source: sui-control
+Section: admin
+Priority: optional
+Maintainer: kodx <dev@kodx.org>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+
+Package: sui-control
+Architecture: all
+Depends: ${misc:Depends},
+ bash (>= 4),
+ coreutils,
+ openssl,
+ sqlite3,
+ adduser,
+ gettext-base,
+ docker.io | docker,
+ docker-compose-plugin | docker-compose
+Description: manage s-ui deployments with Docker Compose
+ SUI-Control installs, configures and maintains an s-ui deployment
+ with Docker Compose. Supports ACME (Let's Encrypt) and self-signed
+ certificates, multiple init systems (systemd, OpenRC, runit, s6,
+ dinit), and runs under a dedicated non-root system user.

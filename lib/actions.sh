@@ -138,25 +138,16 @@ ensure_config_loaded() {
 }
 
 # ----------------------------------------------------------------------
-# Requirement checks
+# Install-specific requirement checks
 # ----------------------------------------------------------------------
-check_requirements() {
-    require_command docker stat
-    docker compose version >/dev/null 2>&1 || die "docker compose plugin is required"
-    case "$CURRENT_COMMAND" in
-        install)
-            require_command sqlite3 tr head grep awk
-            [[ "$CERT_MODE" != "selfsigned" ]] || require_command openssl
-            if [[ "$CERT_MODE" == "acme" ]]; then
-                detect_init_system
-                [[ "$INIT_SYSTEM" != "unsupported" ]] \
-                    || log_warn "No supported init system found; renewal timer will not be auto-activated"
-            fi
-            ;;
-        init)
-            [[ "$CERT_MODE" != "selfsigned" ]] || require_command openssl
-            ;;
-    esac
+check_install_requirements() {
+    require_command sqlite3 tr head grep awk
+    [[ "$CERT_MODE" != "selfsigned" ]] || require_command openssl
+    if [[ "$CERT_MODE" == "acme" ]]; then
+        detect_init_system
+        [[ "$INIT_SYSTEM" != "unsupported" ]] \
+            || log_warn "No supported init system found; renewal timer will not be auto-activated"
+    fi
 }
 
 # ----------------------------------------------------------------------
@@ -746,4 +737,108 @@ print_path_status() {
     else
         echo "$label: missing ($path)"
     fi
+}
+
+# ----------------------------------------------------------------------
+# Template substitution for FHS-mode setup
+# ----------------------------------------------------------------------
+substitute_template() {
+    local template="$1" output="$2"
+    [[ -f "$template" ]] || die "Template not found: $template"
+    local vars
+    vars="DOMAIN TZ TIMER_ON_CALENDAR TIMER_RANDOM_DELAY CERT_MODE"
+    vars="$vars SELF_SIGNED_DAYS SUI_PANEL_PORT SUI_SUBSCRIPTION_PORT"
+    vars="$vars SUI_PANEL_PATH SUI_SUBSCRIPTION_PATH"
+    vars="$vars PACKAGE_DIR RUNTIME_CERT_DIR RUNTIME_BIN_DIR RUNTIME_DATA_DIR RUNTIME_ACME_DIR"
+    vars="$vars CONFIG_DIR SELF_SIGNED_DIR_NAME SUI_CONTROL_USER"
+    vars="$vars ACME_CERT_SCRIPT_NAME DB_CONFIG_SCRIPT_NAME COMPOSE_FILE_NAME"
+    vars="$vars SYSTEMD_CONTROL_SERVICE_NAME SYSTEMD_RENEW_SERVICE_NAME SYSTEMD_RENEW_TIMER_NAME"
+    vars="$vars SYSTEMD_DST_DIR CRON_DST_DIR CRON_FILE_NAME"
+    vars="$vars INSTALL_GENERATED_USERNAME INSTALL_GENERATED_PASSWORD"
+    (
+        for v in $vars; do
+            export "${v}=${!v:-}"
+        done
+        envsubst < "$template" > "$output"
+    )
+}
+
+# ----------------------------------------------------------------------
+# Bootstrap setup (FHS mode — first-time or re-configuration)
+# ----------------------------------------------------------------------
+bootstrap_installation() {
+    _randomize_if_default SUI_PANEL_PORT        "$DEFAULT_SUI_PANEL_PORT"        CLI_PANEL_PORT_SET        ""               generate_random_port 20000 40000
+    _randomize_if_default SUI_SUBSCRIPTION_PORT "$DEFAULT_SUI_SUBSCRIPTION_PORT" CLI_SUBSCRIPTION_PORT_SET "$SUI_PANEL_PORT" generate_random_port 20000 40000
+    _randomize_if_default SUI_PANEL_PATH        "$DEFAULT_SUI_PANEL_PATH"        CLI_PANEL_PATH_SET        ""               generate_random_path_segment
+    _randomize_if_default SUI_SUBSCRIPTION_PATH "$DEFAULT_SUI_SUBSCRIPTION_PATH" CLI_SUBSCRIPTION_PATH_SET "$SUI_PANEL_PATH" generate_random_path_segment
+
+    [[ "$BATCH_INSTALL" != "1" ]] && run_interactive_installation_dialog
+
+    [[ -n "$INSTALL_GENERATED_USERNAME" ]] || INSTALL_GENERATED_USERNAME="$(generate_random_alnum 20)"
+    [[ -n "$INSTALL_GENERATED_PASSWORD" ]] || INSTALL_GENERATED_PASSWORD="$(generate_random_alnum 20)"
+
+    prepare_effective_settings
+    check_install_requirements
+
+    check_tcp_port_free "$SUI_PANEL_PORT"        || die "Panel TCP port is already in use: $SUI_PANEL_PORT"
+    check_tcp_port_free "$SUI_SUBSCRIPTION_PORT" || die "Subscription TCP port is already in use: $SUI_SUBSCRIPTION_PORT"
+
+    if [[ "$CERT_MODE" == "acme" ]]; then
+        local test_image="curlimages/curl:latest"
+        local urls=("https://acme-v02.api.letsencrypt.org/directory" "https://www.google.com/generate_204")
+        local url connected="0"
+        for url in "${urls[@]}"; do
+            if docker run --rm "$test_image" -fsSL --connect-timeout 10 --max-time 20 "$url" >/dev/null 2>&1; then
+                connected="1"
+                break
+            fi
+        done
+        [[ "$connected" == "1" ]] || die "Docker network connectivity check failed for all test endpoints"
+    fi
+
+    mkdir -p "$RUNTIME_BIN_DIR" "$RUNTIME_DATA_DIR" "$RUNTIME_CERT_DIR" "$RUNTIME_ACME_DIR" "$RUNTIME_SYSTEMD_DIR"
+
+    substitute_template "$PACKAGE_DIR/templates/docker-compose.yml.tpl" "$CONFIG_DIR/$COMPOSE_FILE_NAME"
+    substitute_template "$PACKAGE_DIR/templates/sui-control.conf.tpl"  "$CONFIG_DIR/$CONFIG_FILE_NAME"
+    chmod 0600 "$CONFIG_DIR/$CONFIG_FILE_NAME"
+
+    if [[ "$CERT_MODE" == "acme" ]]; then
+        substitute_template "$PACKAGE_DIR/templates/acme-cert.sh.tpl" "$RUNTIME_BIN_DIR/$ACME_CERT_SCRIPT_NAME"
+        chmod 0755 "$RUNTIME_BIN_DIR/$ACME_CERT_SCRIPT_NAME"
+    fi
+    substitute_template "$PACKAGE_DIR/templates/s-ui-db-configure.sh.tpl" "$RUNTIME_BIN_DIR/$DB_CONFIG_SCRIPT_NAME"
+    chmod 0755 "$RUNTIME_BIN_DIR/$DB_CONFIG_SCRIPT_NAME"
+
+    ensure_config_loaded "$CONFIG_DIR/$CONFIG_FILE_NAME"
+
+    local db_script="$RUNTIME_BIN_DIR/$DB_CONFIG_SCRIPT_NAME"
+    local db_path="$RUNTIME_DATA_DIR/s-ui.db"
+    [[ -x "$db_script" ]] || die "Database configuration script not found: $db_script"
+
+    compose_in_dir "$CONFIG_DIR"
+    docker compose up -d --remove-orphans s-ui
+
+    local db_timeout=60 db_elapsed=0
+    log_info "Waiting for s-ui to initialize database (up to ${db_timeout}s)..."
+    while (( db_elapsed < db_timeout )); do
+        [[ -f "$db_path" && -s "$db_path" ]] && break
+        sleep 2
+        db_elapsed=$(( db_elapsed + 2 ))
+    done
+    if [[ ! -f "$db_path" || ! -s "$db_path" ]]; then
+        docker compose logs --no-color s-ui | tail -n 50 >&2 || true
+        die "Database file was not created in time: $db_path"
+    fi
+
+    docker compose stop s-ui
+    [[ -f "$db_path" ]] || die "Database file not found after first start: $db_path"
+    "$db_script" "$INSTALL_GENERATED_USERNAME" "$INSTALL_GENERATED_PASSWORD"
+    docker compose up -d --remove-orphans s-ui
+
+    initialize_runtime_artifacts
+    install_renewal_timer
+
+    log_info "Setup completed"
+    log_info "Generated username: $INSTALL_GENERATED_USERNAME"
+    log_info "Generated password: $INSTALL_GENERATED_PASSWORD"
 }

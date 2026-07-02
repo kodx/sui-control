@@ -1,0 +1,25 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    configure)
+        umask 022
+
+        if ! getent passwd sui-control >/dev/null; then
+            adduser --system --no-create-home --shell /usr/sbin/nologin sui-control
+        fi
+
+        mkdir -p /etc/sui-control \
+            /var/lib/sui-control/bin \
+            /var/lib/sui-control/db \
+            /var/lib/sui-control/cert \
+            /var/lib/sui-control/acme \
+            /var/lib/sui-control/systemd
+
+        chown -R sui-control:sui-control /etc/sui-control /var/lib/sui-control
+
+        if ! groups sui-control >/dev/null 2>&1 | grep -qw docker; then
+            adduser sui-control docker >/dev/null 2>&1 || true
+        fi
+        ;;
+esac

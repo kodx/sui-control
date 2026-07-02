@@ -1,0 +1,14 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    purge)
+        if getent passwd sui-control >/dev/null; then
+            deluser --quiet sui-control >/dev/null 2>&1 || true
+        fi
+        if getent group sui-control >/dev/null; then
+            delgroup --quiet sui-control >/dev/null 2>&1 || true
+        fi
+        rm -rf /etc/sui-control /var/lib/sui-control /usr/lib/sui-control
+        ;;
+esac

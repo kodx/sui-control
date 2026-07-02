@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# .editorconfig hint: indent_style = space, indent_size = 4
 # shellcheck disable=SC2016
 # SPDX-License-Identifier: GPL-3.0-or-later
 set -euo pipefail

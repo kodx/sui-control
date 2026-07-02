@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# .editorconfig hint: indent_style = space, indent_size = 4
 # SPDX-License-Identifier: GPL-3.0-or-later
 set -euo pipefail
 
@@ -44,6 +45,21 @@ elif [[ -d .github/workflows ]]; then
     fi
 else
     echo ":: no .github/workflows directory, skipping actionlint"
+fi
+
+# --- shellcheck on debian maintainer scripts ---
+staged_deb="$(git diff --cached --name-only --diff-filter=ACM | grep '^debian/.*\\(postinst\\|prerm\\|postrm\\)$' || true)"
+if [[ -n "$staged_deb" ]]; then
+    echo ":: shellcheck on debian maintainer scripts..."
+    if echo "$staged_deb" | xargs -r shellcheck 2>&1; then
+        echo -e "${GREEN}   shellcheck passed${NC}"
+        ((checks_passed += 1))
+    else
+        echo -e "${RED}   shellcheck FAILED${NC}"
+        ((checks_failed += 1))
+    fi
+else
+    echo ":: no debian maintainer scripts staged, skipping"
 fi
 
 # --- summary ---
