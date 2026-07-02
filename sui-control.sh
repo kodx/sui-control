@@ -85,4 +85,4 @@ source "$SCRIPT_DIR/lib/actions.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/commands.sh"
 
-main "$@"
+dispatch_command "$@"

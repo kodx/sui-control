@@ -103,6 +103,22 @@ parse_install_options() {
 }
 
 # ----------------------------------------------------------------------
+# Setup sui-control user
+# ----------------------------------------------------------------------
+setup_sui_user() {
+    if id "$SUI_CONTROL_USER" &>/dev/null; then
+        log_info "User $SUI_CONTROL_USER already exists"
+    else
+        log_info "Creating system user $SUI_CONTROL_USER"
+        useradd --system --no-create-home --shell /usr/sbin/nologin "$SUI_CONTROL_USER"
+    fi
+    if ! groups "$SUI_CONTROL_USER" 2>/dev/null | grep -qw docker; then
+        log_info "Adding $SUI_CONTROL_USER to docker group"
+        usermod -aG docker "$SUI_CONTROL_USER"
+    fi
+}
+
+# ----------------------------------------------------------------------
 # Install logic
 # ----------------------------------------------------------------------
 install_control_script() {
@@ -159,6 +175,8 @@ EOF_BANNER
         "$RUNTIME_ACME_DIR" \
         "$RUNTIME_SYSTEMD_DIR"
 
+    setup_sui_user
+
     # Deploy package files (embedded)
     create_generated_file "$PACKAGE_DIR" "lib/constants.sh"              _embed_lib_constants   "0644" "lib constants"
     create_generated_file "$PACKAGE_DIR" "lib/utils.sh"                  _embed_lib_utils       "0644" "lib utils"
@@ -182,6 +200,8 @@ EOF_BANNER
         create_generated_file "$RUNTIME_BIN_DIR" "$ACME_CERT_SCRIPT_NAME" _gen_acme "0755" "acme cert script"
     fi
     create_generated_file "$RUNTIME_BIN_DIR" "$DB_CONFIG_SCRIPT_NAME" _gen_db "0755" "db config script"
+
+    chown -R "$SUI_CONTROL_USER:$SUI_CONTROL_USER" "$PACKAGE_DIR" "$CONFIG_DIR" "$RUNTIME_DIR"
 
     ensure_config_loaded "$CONFIG_DIR/$CONFIG_FILE_NAME"
 

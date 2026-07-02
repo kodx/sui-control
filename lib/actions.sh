@@ -425,7 +425,7 @@ Type=oneshot
 RemainAfterExit=yes
 ExecStart=$PACKAGE_DIR/sui-control.sh start
 ExecStop=$PACKAGE_DIR/sui-control.sh stop
-User=root
+User=$SUI_CONTROL_USER
 
 [Install]
 WantedBy=multi-user.target
@@ -441,7 +441,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 ExecStart=$PACKAGE_DIR/sui-control.sh renew
-User=root
+User=$SUI_CONTROL_USER
 
 [Install]
 WantedBy=multi-user.target
@@ -513,13 +513,13 @@ depend() {
 
 start() {
     ebegin "Starting s-ui"
-    start-stop-daemon --start --exec $PACKAGE_DIR/sui-control.sh -- start
+    start-stop-daemon --start --user $SUI_CONTROL_USER --exec $PACKAGE_DIR/sui-control.sh -- start
     eend \$?
 }
 
 stop() {
     ebegin "Stopping s-ui"
-    start-stop-daemon --stop --exec $PACKAGE_DIR/sui-control.sh
+    start-stop-daemon --stop --user $SUI_CONTROL_USER --exec $PACKAGE_DIR/sui-control.sh
     $PACKAGE_DIR/sui-control.sh stop
     eend \$?
 }
@@ -544,7 +544,7 @@ _install_timer_runit() {
     mkdir -p "$sv_dir"
     cat > "$sv_dir/run" <<RUNIT_RUN
 #!/bin/sh
-exec $PACKAGE_DIR/sui-control.sh start
+exec chpst -u $SUI_CONTROL_USER $PACKAGE_DIR/sui-control.sh start
 RUNIT_RUN
     chmod 0755 "$sv_dir/run"
 
@@ -572,6 +572,7 @@ _install_timer_s6() {
     mkdir -p "$S6_SERVICE_DIR"
     cat > "$S6_SERVICE_DIR/run" <<S6_RUN
 #!/bin/execlineb -P
+s6-setuidgid $SUI_CONTROL_USER
 $PACKAGE_DIR/sui-control.sh start
 S6_RUN
     chmod 0755 "$S6_SERVICE_DIR/run"
@@ -596,6 +597,7 @@ type = process
 command = $PACKAGE_DIR/sui-control.sh start
 stop-command = $PACKAGE_DIR/sui-control.sh stop
 restart-command = $PACKAGE_DIR/sui-control.sh restart
+run-as-user = $SUI_CONTROL_USER
 
 depends-on = docker
 waits-for = docker
@@ -667,7 +669,7 @@ _create_cron_job() {
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-$cron_schedule root $PACKAGE_DIR/sui-control.sh renew
+$cron_schedule $SUI_CONTROL_USER $PACKAGE_DIR/sui-control.sh renew
 CRONEOF
     chmod 0644 "$cron_file"
 }

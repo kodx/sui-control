@@ -40,6 +40,9 @@ CRON_DST_DIR="/etc/cron.d"
 CRON_FILE_NAME="sui-control-renew"
 S6_SERVICE_DIR="/etc/s6/sui-control"
 
+# --- User ---
+SUI_CONTROL_USER="sui-control"
+
 # --- Default configuration values ---
 DEFAULT_DOMAIN=""
 DEFAULT_TZ=""
@@ -117,6 +120,36 @@ resolve_layout() {
     RUNTIME_DATA_DIR="$RUNTIME_DIR/db"
     RUNTIME_CERT_DIR="$RUNTIME_DIR/cert"
     RUNTIME_ACME_DIR="$RUNTIME_DIR/acme"
+}
+
+# ----------------------------------------------------------------------
+# Privilege escalation
+# ----------------------------------------------------------------------
+maybe_escalate_privileges() {
+    [[ "$(id -u)" -eq 0 ]] && return 0
+    if command_exists sudo; then
+        log_info "Escalating privileges via sudo"
+        exec sudo "$0" "$@"
+    elif command_exists doas; then
+        log_info "Escalating privileges via doas"
+        exec doas "$0" "$@"
+    else
+        die "This command requires root privileges. Run with sudo/doas or as root."
+    fi
+}
+
+require_root() {
+    [[ "$(id -u)" -eq 0 ]] || die "This command must be run as root"
+}
+
+require_docker_access() {
+    if ! docker info >/dev/null 2>&1; then
+        if groups "$SUI_CONTROL_USER" 2>/dev/null | grep -qw docker; then
+            die "Docker daemon is not running or not reachable"
+        else
+            die "Docker access is required. Add $SUI_CONTROL_USER to docker group: sudo usermod -aG docker $SUI_CONTROL_USER"
+        fi
+    fi
 }
 
 # ----------------------------------------------------------------------
@@ -253,8 +286,12 @@ parse_config_file() {
     [[ ! -L "$config_file" ]] || die "Refusing to load symlinked config file: $config_file"
     local owner_uid
     owner_uid="$(get_file_owner_uid "$config_file")"
-    [[ -z "$owner_uid" || "$owner_uid" == "0" ]] \
-        || die "Config file must be owned by root: $config_file"
+    if [[ -n "$owner_uid" && "$owner_uid" != "0" ]]; then
+        local expected_uid
+        expected_uid="$(id -u "$SUI_CONTROL_USER" 2>/dev/null || echo '')"
+        [[ -n "$expected_uid" && "$owner_uid" == "$expected_uid" ]] \
+            || die "Config file must be owned by root or $SUI_CONTROL_USER: $config_file"
+    fi
     while IFS= read -r line || [[ -n "$line" ]]; do
         trim_ascii_whitespace line
         [[ -n "$line" ]]      || continue
@@ -776,7 +813,7 @@ Type=oneshot
 RemainAfterExit=yes
 ExecStart=$PACKAGE_DIR/sui-control.sh start
 ExecStop=$PACKAGE_DIR/sui-control.sh stop
-User=root
+User=$SUI_CONTROL_USER
 
 [Install]
 WantedBy=multi-user.target
@@ -792,7 +829,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 ExecStart=$PACKAGE_DIR/sui-control.sh renew
-User=root
+User=$SUI_CONTROL_USER
 
 [Install]
 WantedBy=multi-user.target
@@ -864,13 +901,13 @@ depend() {
 
 start() {
     ebegin "Starting s-ui"
-    start-stop-daemon --start --exec $PACKAGE_DIR/sui-control.sh -- start
+    start-stop-daemon --start --user $SUI_CONTROL_USER --exec $PACKAGE_DIR/sui-control.sh -- start
     eend \$?
 }
 
 stop() {
     ebegin "Stopping s-ui"
-    start-stop-daemon --stop --exec $PACKAGE_DIR/sui-control.sh
+    start-stop-daemon --stop --user $SUI_CONTROL_USER --exec $PACKAGE_DIR/sui-control.sh
     $PACKAGE_DIR/sui-control.sh stop
     eend \$?
 }
@@ -895,7 +932,7 @@ _install_timer_runit() {
     mkdir -p "$sv_dir"
     cat > "$sv_dir/run" <<RUNIT_RUN
 #!/bin/sh
-exec $PACKAGE_DIR/sui-control.sh start
+exec chpst -u $SUI_CONTROL_USER $PACKAGE_DIR/sui-control.sh start
 RUNIT_RUN
     chmod 0755 "$sv_dir/run"
 
@@ -923,6 +960,7 @@ _install_timer_s6() {
     mkdir -p "$S6_SERVICE_DIR"
     cat > "$S6_SERVICE_DIR/run" <<S6_RUN
 #!/bin/execlineb -P
+s6-setuidgid $SUI_CONTROL_USER
 $PACKAGE_DIR/sui-control.sh start
 S6_RUN
     chmod 0755 "$S6_SERVICE_DIR/run"
@@ -947,6 +985,7 @@ type = process
 command = $PACKAGE_DIR/sui-control.sh start
 stop-command = $PACKAGE_DIR/sui-control.sh stop
 restart-command = $PACKAGE_DIR/sui-control.sh restart
+run-as-user = $SUI_CONTROL_USER
 
 depends-on = docker
 waits-for = docker
@@ -1018,7 +1057,7 @@ _create_cron_job() {
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-$cron_schedule root $PACKAGE_DIR/sui-control.sh renew
+$cron_schedule $SUI_CONTROL_USER $PACKAGE_DIR/sui-control.sh renew
 CRONEOF
     chmod 0644 "$cron_file"
 }
@@ -1294,17 +1333,21 @@ uninstall_control_script() {
         prompt_yes_no "Remove s-ui installation?" 'n' \
             || { log_info "Uninstall cancelled"; return; }
     fi
-    remove_renewal_timer
-    (cd "$CONFIG_DIR" && docker compose down -v --remove-orphans) || true
+    if docker info >/dev/null 2>&1; then
+        (cd "$CONFIG_DIR" && docker compose down -v --remove-orphans) || true
+    else
+        log_warn "Docker daemon not reachable — skip container cleanup"
+    fi
     rm -rf -- "$RUNTIME_DIR" "$CONFIG_DIR"
-    log_info "Installation removed"
+    remove_renewal_timer
+    log_info "Installation data removed"
     log_info "Package at $PACKAGE_DIR was not removed (remove manually if desired)"
 }
 
 # ----------------------------------------------------------------------
 # Entry point
 # ----------------------------------------------------------------------
-main() {
+dispatch_command() {
     local source_path="$SCRIPT_ARG0"
     if [[ ! -r "$source_path" || -d "$source_path" ]]; then
         if [[ -r "/proc/$$/fd/255" ]]; then
@@ -1322,6 +1365,8 @@ main() {
         show_usage
         exit 1
     fi
+
+    local original_args=("$@")
 
     COMMAND="$1"
     if [[ "$COMMAND" == "help" ]]; then
@@ -1392,26 +1437,28 @@ main() {
         die "Options --domain and --ip are mutually exclusive"
     fi
 
-    [[ "$(id -u)" -eq 0 ]] || die "This script must be run as root"
-
     case "$COMMAND" in
         start)
             CURRENT_COMMAND="start"
+            require_docker_access
             ensure_config_loaded
             start_containers
             ;;
         stop)
             CURRENT_COMMAND="stop"
+            require_docker_access
             ensure_config_loaded
             stop_containers
             ;;
         restart)
             CURRENT_COMMAND="restart"
+            require_docker_access
             ensure_config_loaded
             restart_containers
             ;;
         renew)
             CURRENT_COMMAND="renew"
+            require_docker_access
             ensure_config_loaded
             check_requirements
             renew_certificate
@@ -1419,12 +1466,14 @@ main() {
         renew-now)
             log_warn "renew-now is deprecated; use 'renew' instead"
             CURRENT_COMMAND="renew"
+            require_docker_access
             ensure_config_loaded
             check_requirements
             renew_certificate
             ;;
         init)
             CURRENT_COMMAND="init"
+            require_docker_access
             ensure_config_loaded
             check_requirements
             initialize_runtime_artifacts
@@ -1435,32 +1484,44 @@ main() {
             ;;
         service-install)
             CURRENT_COMMAND="service-install"
+            if [[ "$(id -u)" -ne 0 ]]; then
+                maybe_escalate_privileges "${original_args[@]}"
+            fi
             ensure_config_loaded
             install_renewal_timer
             ;;
         service-remove)
             CURRENT_COMMAND="service-remove"
+            if [[ "$(id -u)" -ne 0 ]]; then
+                maybe_escalate_privileges "${original_args[@]}"
+            fi
             ensure_config_loaded
             remove_renewal_timer
             ;;
         update)
             CURRENT_COMMAND="update"
+            require_docker_access
             ensure_config_loaded
             check_requirements
             update_containers
             ;;
         cleanup)
             CURRENT_COMMAND="cleanup"
+            require_docker_access
             require_command docker
             cleanup_docker_artifacts
             ;;
         cleanup-all)
             CURRENT_COMMAND="cleanup-all"
+            require_docker_access
             require_command docker
             cleanup_docker_artifacts 1
             ;;
         uninstall)
             CURRENT_COMMAND="uninstall"
+            if [[ "$(id -u)" -ne 0 ]]; then
+                maybe_escalate_privileges "${original_args[@]}"
+            fi
             uninstall_control_script
             ;;
         *)
@@ -1561,7 +1622,7 @@ source "$SCRIPT_DIR/lib/actions.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/commands.sh"
 
-main "$@"
+dispatch_command "$@"
 EOF__entry_point
 }
 # --- Template files ---
@@ -2002,6 +2063,22 @@ parse_install_options() {
 }
 
 # ----------------------------------------------------------------------
+# Setup sui-control user
+# ----------------------------------------------------------------------
+setup_sui_user() {
+    if id "$SUI_CONTROL_USER" &>/dev/null; then
+        log_info "User $SUI_CONTROL_USER already exists"
+    else
+        log_info "Creating system user $SUI_CONTROL_USER"
+        useradd --system --no-create-home --shell /usr/sbin/nologin "$SUI_CONTROL_USER"
+    fi
+    if ! groups "$SUI_CONTROL_USER" 2>/dev/null | grep -qw docker; then
+        log_info "Adding $SUI_CONTROL_USER to docker group"
+        usermod -aG docker "$SUI_CONTROL_USER"
+    fi
+}
+
+# ----------------------------------------------------------------------
 # Install logic
 # ----------------------------------------------------------------------
 install_control_script() {
@@ -2058,6 +2135,8 @@ EOF_BANNER
         "$RUNTIME_ACME_DIR" \
         "$RUNTIME_SYSTEMD_DIR"
 
+    setup_sui_user
+
     # Deploy package files (embedded)
     create_generated_file "$PACKAGE_DIR" "lib/constants.sh"              _embed_lib_constants   "0644" "lib constants"
     create_generated_file "$PACKAGE_DIR" "lib/utils.sh"                  _embed_lib_utils       "0644" "lib utils"
@@ -2081,6 +2160,8 @@ EOF_BANNER
         create_generated_file "$RUNTIME_BIN_DIR" "$ACME_CERT_SCRIPT_NAME" _gen_acme "0755" "acme cert script"
     fi
     create_generated_file "$RUNTIME_BIN_DIR" "$DB_CONFIG_SCRIPT_NAME" _gen_db "0755" "db config script"
+
+    chown -R "$SUI_CONTROL_USER:$SUI_CONTROL_USER" "$PACKAGE_DIR" "$CONFIG_DIR" "$RUNTIME_DIR"
 
     ensure_config_loaded "$CONFIG_DIR/$CONFIG_FILE_NAME"
 
@@ -2117,6 +2198,6 @@ EOF_BANNER
 }
 
 # === ENTRY POINT ===
+maybe_escalate_privileges "$@"
 parse_install_options "$@"
-[[ "$(id -u)" -eq 0 ]] || die "This script must be run as root"
 install_control_script

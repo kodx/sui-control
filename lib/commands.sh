@@ -192,17 +192,21 @@ uninstall_control_script() {
         prompt_yes_no "Remove s-ui installation?" 'n' \
             || { log_info "Uninstall cancelled"; return; }
     fi
-    remove_renewal_timer
-    (cd "$CONFIG_DIR" && docker compose down -v --remove-orphans) || true
+    if docker info >/dev/null 2>&1; then
+        (cd "$CONFIG_DIR" && docker compose down -v --remove-orphans) || true
+    else
+        log_warn "Docker daemon not reachable — skip container cleanup"
+    fi
     rm -rf -- "$RUNTIME_DIR" "$CONFIG_DIR"
-    log_info "Installation removed"
+    remove_renewal_timer
+    log_info "Installation data removed"
     log_info "Package at $PACKAGE_DIR was not removed (remove manually if desired)"
 }
 
 # ----------------------------------------------------------------------
 # Entry point
 # ----------------------------------------------------------------------
-main() {
+dispatch_command() {
     local source_path="$SCRIPT_ARG0"
     if [[ ! -r "$source_path" || -d "$source_path" ]]; then
         if [[ -r "/proc/$$/fd/255" ]]; then
@@ -220,6 +224,8 @@ main() {
         show_usage
         exit 1
     fi
+
+    local original_args=("$@")
 
     COMMAND="$1"
     if [[ "$COMMAND" == "help" ]]; then
@@ -290,26 +296,28 @@ main() {
         die "Options --domain and --ip are mutually exclusive"
     fi
 
-    [[ "$(id -u)" -eq 0 ]] || die "This script must be run as root"
-
     case "$COMMAND" in
         start)
             CURRENT_COMMAND="start"
+            require_docker_access
             ensure_config_loaded
             start_containers
             ;;
         stop)
             CURRENT_COMMAND="stop"
+            require_docker_access
             ensure_config_loaded
             stop_containers
             ;;
         restart)
             CURRENT_COMMAND="restart"
+            require_docker_access
             ensure_config_loaded
             restart_containers
             ;;
         renew)
             CURRENT_COMMAND="renew"
+            require_docker_access
             ensure_config_loaded
             check_requirements
             renew_certificate
@@ -317,12 +325,14 @@ main() {
         renew-now)
             log_warn "renew-now is deprecated; use 'renew' instead"
             CURRENT_COMMAND="renew"
+            require_docker_access
             ensure_config_loaded
             check_requirements
             renew_certificate
             ;;
         init)
             CURRENT_COMMAND="init"
+            require_docker_access
             ensure_config_loaded
             check_requirements
             initialize_runtime_artifacts
@@ -333,32 +343,44 @@ main() {
             ;;
         service-install)
             CURRENT_COMMAND="service-install"
+            if [[ "$(id -u)" -ne 0 ]]; then
+                maybe_escalate_privileges "${original_args[@]}"
+            fi
             ensure_config_loaded
             install_renewal_timer
             ;;
         service-remove)
             CURRENT_COMMAND="service-remove"
+            if [[ "$(id -u)" -ne 0 ]]; then
+                maybe_escalate_privileges "${original_args[@]}"
+            fi
             ensure_config_loaded
             remove_renewal_timer
             ;;
         update)
             CURRENT_COMMAND="update"
+            require_docker_access
             ensure_config_loaded
             check_requirements
             update_containers
             ;;
         cleanup)
             CURRENT_COMMAND="cleanup"
+            require_docker_access
             require_command docker
             cleanup_docker_artifacts
             ;;
         cleanup-all)
             CURRENT_COMMAND="cleanup-all"
+            require_docker_access
             require_command docker
             cleanup_docker_artifacts 1
             ;;
         uninstall)
             CURRENT_COMMAND="uninstall"
+            if [[ "$(id -u)" -ne 0 ]]; then
+                maybe_escalate_privileges "${original_args[@]}"
+            fi
             uninstall_control_script
             ;;
         *)

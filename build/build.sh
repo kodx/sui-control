@@ -80,8 +80,8 @@ generate_gen_func() {
     echo
 
     echo '# === ENTRY POINT ==='
+    echo 'maybe_escalate_privileges "$@"'
     echo 'parse_install_options "$@"'
-    echo '[[ "$(id -u)" -eq 0 ]] || die "This script must be run as root"'
     echo 'install_control_script'
 
 } > "$OUTPUT"

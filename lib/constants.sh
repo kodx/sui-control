@@ -29,6 +29,9 @@ CRON_DST_DIR="/etc/cron.d"
 CRON_FILE_NAME="sui-control-renew"
 S6_SERVICE_DIR="/etc/s6/sui-control"
 
+# --- User ---
+SUI_CONTROL_USER="sui-control"
+
 # --- Default configuration values ---
 DEFAULT_DOMAIN=""
 DEFAULT_TZ=""

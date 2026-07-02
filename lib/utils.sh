@@ -23,6 +23,36 @@ resolve_layout() {
 }
 
 # ----------------------------------------------------------------------
+# Privilege escalation
+# ----------------------------------------------------------------------
+maybe_escalate_privileges() {
+    [[ "$(id -u)" -eq 0 ]] && return 0
+    if command_exists sudo; then
+        log_info "Escalating privileges via sudo"
+        exec sudo "$0" "$@"
+    elif command_exists doas; then
+        log_info "Escalating privileges via doas"
+        exec doas "$0" "$@"
+    else
+        die "This command requires root privileges. Run with sudo/doas or as root."
+    fi
+}
+
+require_root() {
+    [[ "$(id -u)" -eq 0 ]] || die "This command must be run as root"
+}
+
+require_docker_access() {
+    if ! docker info >/dev/null 2>&1; then
+        if groups "$SUI_CONTROL_USER" 2>/dev/null | grep -qw docker; then
+            die "Docker daemon is not running or not reachable"
+        else
+            die "Docker access is required. Add $SUI_CONTROL_USER to docker group: sudo usermod -aG docker $SUI_CONTROL_USER"
+        fi
+    fi
+}
+
+# ----------------------------------------------------------------------
 # Logging
 # ----------------------------------------------------------------------
 log_message() {
@@ -156,8 +186,12 @@ parse_config_file() {
     [[ ! -L "$config_file" ]] || die "Refusing to load symlinked config file: $config_file"
     local owner_uid
     owner_uid="$(get_file_owner_uid "$config_file")"
-    [[ -z "$owner_uid" || "$owner_uid" == "0" ]] \
-        || die "Config file must be owned by root: $config_file"
+    if [[ -n "$owner_uid" && "$owner_uid" != "0" ]]; then
+        local expected_uid
+        expected_uid="$(id -u "$SUI_CONTROL_USER" 2>/dev/null || echo '')"
+        [[ -n "$expected_uid" && "$owner_uid" == "$expected_uid" ]] \
+            || die "Config file must be owned by root or $SUI_CONTROL_USER: $config_file"
+    fi
     while IFS= read -r line || [[ -n "$line" ]]; do
         trim_ascii_whitespace line
         [[ -n "$line" ]]      || continue
