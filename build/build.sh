@@ -79,4 +79,16 @@ generate_gen_func() {
 } > "$OUTPUT"
 
 chmod +x "$OUTPUT"
+
+# Verify source files and built artifact with shellcheck
+if command -v shellcheck &>/dev/null; then
+    if shellcheck "$PROJECT_DIR"/lib/*.sh "$PROJECT_DIR/sui-control.sh" \
+            "$OUTPUT" 2>&1; then
+        echo "   shellcheck: passed"
+    else
+        echo "   shellcheck: FAILED" >&2
+        exit 1
+    fi
+fi
+
 echo "Built: $OUTPUT ($(wc -c < "$OUTPUT") bytes, $(wc -l < "$OUTPUT") lines)"
