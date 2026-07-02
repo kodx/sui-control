@@ -27,6 +27,7 @@ SYSTEMD_RENEW_SERVICE_NAME="sui-control-renew.service"
 SYSTEMD_RENEW_TIMER_NAME="sui-control-renew.timer"
 CRON_DST_DIR="/etc/cron.d"
 CRON_FILE_NAME="sui-control-renew"
+S6_SERVICE_DIR="/etc/s6/sui-control"
 
 # --- Default configuration values ---
 DEFAULT_DOMAIN=""

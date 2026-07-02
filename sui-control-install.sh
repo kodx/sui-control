@@ -38,6 +38,7 @@ SYSTEMD_RENEW_SERVICE_NAME="sui-control-renew.service"
 SYSTEMD_RENEW_TIMER_NAME="sui-control-renew.timer"
 CRON_DST_DIR="/etc/cron.d"
 CRON_FILE_NAME="sui-control-renew"
+S6_SERVICE_DIR="/etc/s6/sui-control"
 
 # --- Default configuration values ---
 DEFAULT_DOMAIN=""
@@ -176,7 +177,18 @@ is_ipv4() {
 }
 
 is_ipv6() {
-    [[ "$1" =~ : ]] && return 0 || return 1
+    local s="$1" part colons
+    [[ -n "$s" ]] || return 1
+    [[ "$s" =~ ^[0-9a-fA-F:]+$ ]] || return 1
+    [[ "$s" == *::* ]] || return 1
+    [[ "$s" != *:::* ]] || return 1
+    colons="${s//[^:]/}"
+    (( ${#colons} <= 7 )) || return 1
+    IFS=':' read -r -a parts <<< "$s"
+    for part in "${parts[@]}"; do
+        [[ -z "$part" || ${#part} -le 4 ]] || return 1
+    done
+    return 0
 }
 
 is_ip() {
@@ -463,6 +475,7 @@ load_install_config() {
     SUI_SUBSCRIPTION_PORT="$DEFAULT_SUI_SUBSCRIPTION_PORT"
     SUI_PANEL_PATH="$DEFAULT_SUI_PANEL_PATH"
     SUI_SUBSCRIPTION_PATH="$DEFAULT_SUI_SUBSCRIPTION_PATH"
+    INIT_SYSTEM="$DEFAULT_INIT_SYSTEM"
     parse_config_file "$config_file"
     prepare_effective_settings
 }
@@ -834,15 +847,15 @@ _remove_timer_systemd() {
 # ----------------------------------------------------------------------
 _install_timer_openrc() {
     local init_file="/etc/init.d/sui-control"
-    cat > "$init_file" <<'OPENRC_INIT'
+    cat > "$init_file" <<OPENRC_INIT
 #!/sbin/openrc-run
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 description="SUI-Control"
 
-command="/opt/s-ui/sui-control.sh"
+command="$PACKAGE_DIR/sui-control.sh"
 command_args=""
-pidfile="/run/${RC_SVCNAME}.pid"
+pidfile="/run/\${RC_SVCNAME}.pid"
 
 depend() {
     need net
@@ -851,15 +864,15 @@ depend() {
 
 start() {
     ebegin "Starting s-ui"
-    start-stop-daemon --start --exec /opt/s-ui/sui-control.sh -- start
-    eend $?
+    start-stop-daemon --start --exec $PACKAGE_DIR/sui-control.sh -- start
+    eend \$?
 }
 
 stop() {
     ebegin "Stopping s-ui"
-    start-stop-daemon --stop --exec /opt/s-ui/sui-control.sh
-    /opt/s-ui/sui-control.sh stop
-    eend $?
+    start-stop-daemon --stop --exec $PACKAGE_DIR/sui-control.sh
+    $PACKAGE_DIR/sui-control.sh stop
+    eend \$?
 }
 OPENRC_INIT
     chmod 0755 "$init_file"
@@ -880,15 +893,15 @@ _remove_timer_openrc() {
 _install_timer_runit() {
     local sv_dir="/etc/sv/sui-control"
     mkdir -p "$sv_dir"
-    cat > "$sv_dir/run" <<'RUNIT_RUN'
+    cat > "$sv_dir/run" <<RUNIT_RUN
 #!/bin/sh
-exec /opt/s-ui/sui-control.sh start
+exec $PACKAGE_DIR/sui-control.sh start
 RUNIT_RUN
     chmod 0755 "$sv_dir/run"
 
-    cat > "$sv_dir/finish" <<'RUNIT_FINISH'
+    cat > "$sv_dir/finish" <<RUNIT_FINISH
 #!/bin/sh
-exec /opt/s-ui/sui-control.sh stop
+exec $PACKAGE_DIR/sui-control.sh stop
 RUNIT_FINISH
     chmod 0755 "$sv_dir/finish"
 
@@ -907,21 +920,20 @@ _remove_timer_runit() {
 # Timer system — s6
 # ----------------------------------------------------------------------
 _install_timer_s6() {
-    local sv_dir="/etc/s6/sui-control"
-    mkdir -p "$sv_dir"
-    cat > "$sv_dir/run" <<'S6_RUN'
+    mkdir -p "$S6_SERVICE_DIR"
+    cat > "$S6_SERVICE_DIR/run" <<S6_RUN
 #!/bin/execlineb -P
-/opt/s-ui/sui-control.sh start
+$PACKAGE_DIR/sui-control.sh start
 S6_RUN
-    chmod 0755 "$sv_dir/run"
+    chmod 0755 "$S6_SERVICE_DIR/run"
 
     _create_cron_job
     mkdir -p /etc/s6
-    ln -sfn "$sv_dir" "/etc/s6/service" 2>/dev/null || true
+    ln -sfn "$S6_SERVICE_DIR" "/etc/s6/service" 2>/dev/null || true
 }
 
 _remove_timer_s6() {
-    rm -rf "/etc/s6/sui-control"
+    rm -rf "$S6_SERVICE_DIR"
     _remove_cron_job
 }
 
@@ -932,9 +944,9 @@ _install_timer_dinit() {
     local sv_file="/etc/dinit.d/sui-control"
     cat > "$sv_file" <<DINIT_SVC
 type = process
-command = /opt/s-ui/sui-control.sh start
-stop-command = /opt/s-ui/sui-control.sh stop
-restart-command = /opt/s-ui/sui-control.sh restart
+command = $PACKAGE_DIR/sui-control.sh start
+stop-command = $PACKAGE_DIR/sui-control.sh stop
+restart-command = $PACKAGE_DIR/sui-control.sh restart
 
 depends-on = docker
 waits-for = docker
@@ -954,7 +966,7 @@ _remove_timer_dinit() {
 # Cron helper
 # ----------------------------------------------------------------------
 _systemd_oncalendar_to_cron() {
-    local cal="$1" day_part time_part hour min
+    local cal="$1" day_part time_part hour min d nums days
     case "$cal" in
         daily|weekly|monthly|yearly|annually|@*)
             case "$cal" in
@@ -970,6 +982,26 @@ _systemd_oncalendar_to_cron() {
     time_part="${cal##* }"
     hour="${time_part%%:*}"
     min="${time_part#*:}"; min="${min%%:*}"
+    if [[ "$day_part" == *,* ]]; then
+        nums=""
+        IFS=',' read -r -a days <<< "$day_part"
+        for d in "${days[@]}"; do
+            case "$d" in
+                Sun) nums="${nums},0" ;;
+                Mon) nums="${nums},1" ;;
+                Tue) nums="${nums},2" ;;
+                Wed) nums="${nums},3" ;;
+                Thu) nums="${nums},4" ;;
+                Fri) nums="${nums},5" ;;
+                Sat) nums="${nums},6" ;;
+                *)   nums=""; break ;;
+            esac
+        done
+        if [[ -n "$nums" ]]; then
+            printf '%s %s * * %s\n' "$min" "$hour" "${nums#,}"
+            return
+        fi
+    fi
     case "$day_part" in
         Mon)     printf '%s %s * * 1\n' "$min" "$hour" ;;
         Sat,Sun) printf '%s %s * * 0,6\n' "$min" "$hour" ;;
@@ -1200,8 +1232,8 @@ show_status() {
         systemd)
             if command_exists systemctl; then
                 echo "Control service: $(systemctl is-active "$SYSTEMD_CONTROL_SERVICE_NAME" 2>/dev/null || echo unknown)"
-                echo "Renew timer:     $(systemctl is-enabled "$SYSTEMD_RENEW_TIMER_NAME"     2>/dev/null || echo unknown)"
-                echo "Renew timer:     $(systemctl is-active  "$SYSTEMD_RENEW_TIMER_NAME"     2>/dev/null || echo unknown)"
+                echo "Renew timer (enabled): $(systemctl is-enabled "$SYSTEMD_RENEW_TIMER_NAME" 2>/dev/null || echo unknown)"
+                echo "Renew timer (active):  $(systemctl is-active  "$SYSTEMD_RENEW_TIMER_NAME" 2>/dev/null || echo unknown)"
             fi
             ;;
         openrc)
@@ -1216,7 +1248,7 @@ show_status() {
             ;;
         s6)
             if command_exists s6-svstat; then
-                echo "Service: $(s6-svstat /etc/s6/sui-control 2>/dev/null || echo 'check s6-svstat')"
+                echo "Service: $(s6-svstat "$S6_SERVICE_DIR" 2>/dev/null || echo 'check s6-svstat')"
             fi
             ;;
         dinit)
@@ -1950,9 +1982,7 @@ parse_install_options() {
             -h|--help)
                 show_install_help; exit 0 ;;
             *)
-                echo "Unknown option: $1"
-                show_install_help
-                exit 1
+                die "Unknown option: $1"
                 ;;
         esac
     done

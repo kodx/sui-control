@@ -8,96 +8,166 @@ Install, configure and maintain an [s-ui](https://github.com/alireza0/s-ui) depl
 curl -sSL https://raw.githubusercontent.com/.../sui-control-install.sh | bash
 ```
 
-Or clone the repo and run:
+Or clone the repo and run the installer locally:
 
 ```bash
 git clone https://github.com/.../sui-control.git
 cd sui-control
-./sui-control.sh install
+./sui-control-install.sh
 ```
 
 ## Usage
 
-```
-sui-control.sh <command> [options]
+### Installer (`sui-control-install.sh`)
 
-Commands:
-  install                       Install or reinstall s-ui into the target directory.
-  init                          Re-initialize runtime artifacts for an existing
-                                installation (regenerate certs, restart).
-  renew-now                     Renew certificates immediately.
-  status                        Show current installation status.
-  service-install               Install and enable the systemd renewal timer.
-  service-remove                Remove the systemd renewal timer.
-  update                        Pull newer container images and restart services.
-  cleanup                       Remove unused Docker containers and dangling images.
-  cleanup-all                   Remove unused Docker containers and all unused images.
-  uninstall                     Stop containers and remove installed files.
+```bash
+./sui-control-install.sh [options]
+```
+
+Interactive dialog by default. Use `--batch` for non-interactive.
 
 Options:
-  --install-dir PATH            Installation directory, default: /opt/s-ui
-  --domain DOMAIN               Public domain for ACME mode
-  --tz TZ                       Time zone
-  --cert-mode MODE              Certificate mode: selfsigned or acme
-  --panel-port PORT             Panel port
-  --subscription-port PORT      Subscription port
-  --panel-path PATH             Panel URL path prefix
-  --subscription-path PATH      Subscription URL path prefix
-  --batch                       Non-interactive install
-  --yes                         Skip confirmation prompts
-  -h, --help                    Show this help message
+| Option | Description |
+|--------|-------------|
+| `--domain DOMAIN` | Public domain for ACME mode (~90-day cert) |
+| `--ip IP` | Public IP for ACME short-lived cert (~6 days) |
+| `--tz TZ` | Time zone for s-ui (optional) |
+| `--timer-on-calendar SPEC` | systemd OnCalendar for renew timer |
+| `--timer-random-delay SPEC` | systemd RandomizedDelaySec for renew timer |
+| `--cert-mode MODE` | `selfsigned` (default) or `acme` |
+| `--panel-port PORT` | Panel port exposed by docker-compose |
+| `--subscription-port PORT` | Subscription port exposed by docker-compose |
+| `--panel-path PATH` | URL path prefix for panel |
+| `--subscription-path PATH` | URL path prefix for subscriptions |
+| `--batch` | Non-interactive install using provided/default values |
+| `--yes` | Skip confirmation prompts where possible |
+| `-h, --help` | Show help |
+
+Installs everything under `/opt/s-ui/` (flat layout). For package-managed installs
+see [Architecture](#architecture).
+
+### Manager (`sui-control.sh`)
+
+```bash
+sui-control.sh <command> [options]
 ```
+
+| Command | Description |
+|---------|-------------|
+| `start` | Start containers |
+| `stop` | Stop containers |
+| `restart` | Restart containers |
+| `renew` | Renew certificates immediately |
+| `status` | Show installation status |
+| `init` | Re-initialize runtime artifacts |
+| `service-install` | Install and enable renewal timer |
+| `service-remove` | Remove renewal timer |
+| `update` | Pull newer images and restart |
+| `cleanup` | Remove unused containers and dangling images |
+| `cleanup-all` | Remove unused containers and all unused images |
+| `uninstall` | Stop containers and remove installed files |
+
+Options: `--domain`, `--ip`, `--tz`, `--timer-on-calendar`, `--timer-random-delay`,
+`--cert-mode`, `--panel-port`, `--subscription-port`, `--panel-path`,
+`--subscription-path`, `--yes`, `-h`, `--help`.
+
+## Architecture
+
+### Dual layout
+
+SUI-Control supports two deployment layouts, auto-detected by `resolve_layout()`:
+
+**Flat mode** (installer default, `/opt/s-ui/`):
+```
+/opt/s-ui/
+├── sui-control.sh        ← PACKAGE_DIR = CONFIG_DIR = RUNTIME_DIR
+├── sui-control.conf
+├── lib/, templates/
+├── bin/, db/, cert/, acme/, systemd/
+```
+
+**FHS mode** (package-managed install):
+| Path | Contents |
+|------|----------|
+| `/usr/lib/sui-control/` | `sui-control.sh`, `lib/`, `templates/` |
+| `/etc/sui-control/` | `sui-control.conf`, `docker-compose.yml` |
+| `/var/lib/sui-control/` | `bin/`, `db/`, `cert/`, `acme/`, `systemd/` |
+
+Detection is automatic based on `PACKAGE_DIR` being under `/usr/lib/` or
+`/usr/local/lib/`.
+
+### Init system abstraction
+
+Supports 5 init systems plus cron fallback, auto-detected in order:
+
+| Backend | Service | Renewal |
+|---------|---------|---------|
+| systemd | `.service` unit | `.timer` unit (native) |
+| OpenRC | `/etc/init.d/sui-control` | cron |
+| runit | `/etc/sv/sui-control` | cron |
+| s6 | `/etc/s6/sui-control` | cron |
+| dinit | `/etc/dinit.d/sui-control` | cron |
+
+Set `init_system` in config to override auto-detection.
+
+### Certificate modes
+
+- **selfsigned** (default): OpenSSL self-signed cert, 825-day validity
+- **acme**: Let's Encrypt via acme.sh
+  - `--domain` FQDN: ~90-day cert, weekly renewal
+  - `--ip` address: short-lived profile (~6-day cert), daily renewal
 
 ## Development
 
-### Project structure
-
 ```
 sui-control/
-├── config.conf              User overrides (not tracked by git)
-├── sui-control.sh              Entry point (sources lib/* during development)
-├── sui-control-install.sh      Self-contained installer (built artifact, committed)
-├── build/build.sh              Build script: assembles sui-control-install.sh
+├── config.conf              User overrides (not tracked)
+├── VERSION                  Single source of version truth
+├── sui-control.sh           Entry point (sources lib/ during dev)
+├── sui-control-install.sh   Built artifact (committed)
+├── build/build.sh           Build script
 ├── lib/
-│   ├── constants.sh               Constants, defaults, globals
-│   ├── utils.sh                Reusable toolkit (logging, validation, docker helpers)
-│   ├── actions.sh              s-ui-specific actions (prompts, cert, systemd)
-│   └── commands.sh             CLI command implementations + main()
+│   ├── constants.sh             Constants, defaults, globals
+│   ├── utils.sh                 Shared toolkit (logging, validation, etc.)
+│   ├── actions.sh               Project actions (prompts, certs, timer system)
+│   ├── commands.sh              CLI commands + main()
+│   └── install.sh               Install-only logic (not deployed)
 ├── templates/
-│   ├── docker-compose.yml.tpl  Docker Compose template
-│   ├── sui-control.conf.tpl    Config file template
-│   ├── acme-cert.sh.tpl        ACME certificate script template
-│   └── s-ui-db-configure.sh.tpl Database configuration script template
-└── build.sh
+│   ├── docker-compose.yml.tpl
+│   ├── sui-control.conf.tpl
+│   ├── acme-cert.sh.tpl
+│   └── s-ui-db-configure.sh.tpl
+└── .githooks/pre-commit         Run shellcheck + actionlint on staged files
 ```
 
 ### Build
-
-### Developer config
-
-Create a `config.conf` in the project root to override defaults without touching `lib/constants.sh`:
-
-```bash
-./sui-control.sh init-config
-```
-
-This file is not tracked by git. If absent, `sui-control.sh` prompts to create it on first real command.
-
 
 ```bash
 ./build/build.sh    # produces sui-control-install.sh
 ```
 
+### Developer config
+
+Create `config.conf` in the project root to override defaults without touching
+`lib/constants.sh`. This file is not tracked by git (listed in `.gitignore`).
+
+```bash
+./sui-control.sh init-config
+```
+
+### Commit hooks
+
+```bash
+git config core.hooksPath .githooks
+```
+
 ### Conventions
 
-- Shared functionality lives in `lib/utils.sh` — single source of truth.
-  This file is also used as `lib-sui-control.sh` for installed scripts.
-- Templates in `templates/` are plain files with `${VARIABLE}` placeholders.
-  The build script wraps each template in a heredoc-based generator function.
-- Adding a new init system (OpenRC, supervisord, etc.):
-  1. Add functions in `lib/actions.sh`
-  2. Add the interface call in the appropriate command handler
-  3. (Optional) Add templates in `templates/init/<name>/`
+- `lib/*.sh` have no shebang (sourced), SPDX header, `.editorconfig` hint
+- Templates use `${VARIABLE}` placeholders; generators are unquoted heredocs
+- `lib/install.sh` is NOT deployed to target — embed-only in the installer
+- All timer backends dispatch from a single `install_renewal_timer()` / `remove_renewal_timer()`
+- Adding a new init system: add `_install_timer_$name` / `_remove_timer_$name` in `actions.sh`
 
 ## License
 

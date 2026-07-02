@@ -8,6 +8,10 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 OUTPUT="$PROJECT_DIR/sui-control-install.sh"
 VERSION="$(cat "$PROJECT_DIR/VERSION")"
 
+# Validate VERSION is semver
+[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]] \
+    || { echo "ERROR: VERSION does not match semver: $VERSION" >&2; exit 1; }
+
 generate_embed_func() {
     local func_name="$1"
     local file_path="$2"

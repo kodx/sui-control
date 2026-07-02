@@ -80,7 +80,18 @@ is_ipv4() {
 }
 
 is_ipv6() {
-    [[ "$1" =~ : ]] && return 0 || return 1
+    local s="$1" part colons
+    [[ -n "$s" ]] || return 1
+    [[ "$s" =~ ^[0-9a-fA-F:]+$ ]] || return 1
+    [[ "$s" == *::* ]] || return 1
+    [[ "$s" != *:::* ]] || return 1
+    colons="${s//[^:]/}"
+    (( ${#colons} <= 7 )) || return 1
+    IFS=':' read -r -a parts <<< "$s"
+    for part in "${parts[@]}"; do
+        [[ -z "$part" || ${#part} -le 4 ]] || return 1
+    done
+    return 0
 }
 
 is_ip() {

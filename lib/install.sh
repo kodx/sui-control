@@ -83,9 +83,7 @@ parse_install_options() {
             -h|--help)
                 show_install_help; exit 0 ;;
             *)
-                echo "Unknown option: $1"
-                show_install_help
-                exit 1
+                die "Unknown option: $1"
                 ;;
         esac
     done

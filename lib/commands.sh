@@ -130,8 +130,8 @@ show_status() {
         systemd)
             if command_exists systemctl; then
                 echo "Control service: $(systemctl is-active "$SYSTEMD_CONTROL_SERVICE_NAME" 2>/dev/null || echo unknown)"
-                echo "Renew timer:     $(systemctl is-enabled "$SYSTEMD_RENEW_TIMER_NAME"     2>/dev/null || echo unknown)"
-                echo "Renew timer:     $(systemctl is-active  "$SYSTEMD_RENEW_TIMER_NAME"     2>/dev/null || echo unknown)"
+                echo "Renew timer (enabled): $(systemctl is-enabled "$SYSTEMD_RENEW_TIMER_NAME" 2>/dev/null || echo unknown)"
+                echo "Renew timer (active):  $(systemctl is-active  "$SYSTEMD_RENEW_TIMER_NAME" 2>/dev/null || echo unknown)"
             fi
             ;;
         openrc)
@@ -146,7 +146,7 @@ show_status() {
             ;;
         s6)
             if command_exists s6-svstat; then
-                echo "Service: $(s6-svstat /etc/s6/sui-control 2>/dev/null || echo 'check s6-svstat')"
+                echo "Service: $(s6-svstat "$S6_SERVICE_DIR" 2>/dev/null || echo 'check s6-svstat')"
             fi
             ;;
         dinit)
