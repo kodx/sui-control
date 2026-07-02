@@ -36,6 +36,8 @@ DEFAULT_BIN_DIR="./bin"
 DEFAULT_SYSTEMD_DST_DIR="/etc/systemd/system"
 DEFAULT_TIMER_ON_CALENDAR="Mon *-*-* 03:00:00"
 DEFAULT_TIMER_RANDOM_DELAY="1h"
+DEFAULT_TIMER_ON_CALENDAR_IP="daily"
+DEFAULT_TIMER_RANDOM_DELAY_IP="2h"
 DEFAULT_CERT_MODE="selfsigned"
 DEFAULT_SELF_SIGNED_DAYS="825"
 DEFAULT_SUI_PANEL_PORT="2095"
@@ -82,6 +84,7 @@ CLI_PANEL_PORT_SET=""
 CLI_SUBSCRIPTION_PORT_SET=""
 CLI_PANEL_PATH_SET=""
 CLI_SUBSCRIPTION_PATH_SET=""
+CLI_IP_CERT_SET=""
 EOF__lib_constants
 }
 _embed_lib_utils() {
@@ -142,6 +145,18 @@ require_command() {
     for cmd in "$@"; do
         command_exists "$cmd" || die "Required command not found: $cmd"
     done
+}
+
+is_ipv4() {
+    [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] && return 0 || return 1
+}
+
+is_ipv6() {
+    [[ "$1" =~ : ]] && return 0 || return 1
+}
+
+is_ip() {
+    is_ipv4 "$1" || is_ipv6 "$1"
 }
 
 get_file_owner_uid() {
@@ -409,8 +424,16 @@ prepare_effective_settings() {
             systemd-analyze timespan "$TIMER_RANDOM_DELAY" >/dev/null 2>&1 \
                 || die "Invalid systemd RandomizedDelaySec value: $TIMER_RANDOM_DELAY"
         fi
-        validate_domain "$DOMAIN"
-        [[ "$DOMAIN" != "localhost" ]] || die "Domain must not be localhost in acme mode"
+        if is_ip "$DOMAIN"; then
+            is_ipv4 "$DOMAIN" || is_ipv6 "$DOMAIN" || die "Invalid IP address: $DOMAIN"
+            if [[ "$TIMER_ON_CALENDAR" == "$DEFAULT_TIMER_ON_CALENDAR" && "$TIMER_RANDOM_DELAY" == "$DEFAULT_TIMER_RANDOM_DELAY" ]]; then
+                TIMER_ON_CALENDAR="$DEFAULT_TIMER_ON_CALENDAR_IP"
+                TIMER_RANDOM_DELAY="$DEFAULT_TIMER_RANDOM_DELAY_IP"
+            fi
+        else
+            validate_domain "$DOMAIN"
+            [[ "$DOMAIN" != "localhost" ]] || die "Domain must not be localhost in acme mode"
+        fi
     else
         DOMAIN="localhost"
     fi
@@ -561,10 +584,14 @@ prompt_certificate_mode() {
     done
 }
 
-prompt_domain_if_needed() {
+prompt_acme_identifier() {
     if [[ "$CERT_MODE" == "acme" ]]; then
-        DOMAIN="$(prompt_with_default 'Domain for ACME certificate' "${DOMAIN:-panel.example.com}")"
-        validate_domain "$DOMAIN"
+        DOMAIN="$(prompt_with_default 'Domain or IP for ACME (domain ~90 days, IP ~6 days)' "${DOMAIN:-panel.example.com}")"
+        if is_ip "$DOMAIN"; then
+            is_ipv4 "$DOMAIN" || is_ipv6 "$DOMAIN" || die "Invalid IP address: $DOMAIN"
+        else
+            validate_domain "$DOMAIN"
+        fi
     else
         DOMAIN="localhost"
     fi
@@ -574,7 +601,7 @@ show_install_defaults() {
     echo 'Current installation values:'
     echo "  1. Install directory  : $INSTALL_DIR"
     echo "  2. Certificate mode   : $CERT_MODE"
-    echo "  3. Domain             : ${DOMAIN:-(empty)}"
+    echo "  3. ACME identifier    : ${DOMAIN:-(empty)}"
     echo "  4. Time zone          : ${TZ:-(empty)}"
     echo "  5. Panel port         : $SUI_PANEL_PORT"
     echo "  6. Subscription port  : $SUI_SUBSCRIPTION_PORT"
@@ -588,7 +615,7 @@ edit_install_option() {
         1) INSTALL_DIR="$(prompt_with_default 'Install directory' "$INSTALL_DIR")" ;;
         2) CERT_MODE="$(prompt_certificate_mode "$CERT_MODE")"
            [[ "$CERT_MODE" == "selfsigned" ]] && DOMAIN='' ;;
-        3) [[ "$CERT_MODE" == "acme" ]] && prompt_domain_if_needed || echo 'Domain is used only in ACME mode.' ;;
+        3) [[ "$CERT_MODE" == "acme" ]] && prompt_acme_identifier || echo 'Domain is used only in ACME mode.' ;;
         4) TZ="$(prompt_with_default 'Time zone (optional)' "$TZ")" ;;
         5) SUI_PANEL_PORT="$(prompt_with_default 'Panel port' "$SUI_PANEL_PORT")" ;;
         6) SUI_SUBSCRIPTION_PORT="$(prompt_with_default 'Subscription port' "$SUI_SUBSCRIPTION_PORT")" ;;
@@ -606,7 +633,7 @@ run_interactive_installation_dialog() {
         echo
         echo '  1) Change install directory'
         echo '  2) Change certificate mode'
-        echo '  3) Change domain'
+        echo '  3) Change ACME identifier'
         echo '  4) Change time zone'
         echo '  5) Change panel port'
         echo '  6) Change subscription port'
@@ -620,9 +647,13 @@ run_interactive_installation_dialog() {
             9)
                 if [[ "$CERT_MODE" == "acme" ]]; then
                     if [[ -z "$DOMAIN" ]]; then
-                        prompt_domain_if_needed
+                        prompt_acme_identifier
                     else
-                        validate_domain "$DOMAIN"
+                        if is_ip "$DOMAIN"; then
+                            is_ipv4 "$DOMAIN" || is_ipv6 "$DOMAIN" || die "Invalid IP address: $DOMAIN"
+                        else
+                            validate_domain "$DOMAIN"
+                        fi
                     fi
                 else
                     DOMAIN='localhost'
@@ -1048,6 +1079,9 @@ main() {
             --domain)
                 require_option_value "$1" "${2-}"
                 DOMAIN="$2"; domain_option_set="1"; shift 2 ;;
+            --ip)
+                require_option_value "$1" "${2-}"
+                DOMAIN="$2"; CLI_IP_CERT_SET="1"; shift 2 ;;
             --tz)
                 require_option_value "$1" "${2-}" 1
                 TZ="$2"; shift 2 ;;
@@ -1097,6 +1131,12 @@ main() {
 
     if [[ "$domain_option_set" == "1" && "$CERT_MODE" != "acme" ]]; then
         die "Option --domain is allowed only together with --cert-mode acme"
+    fi
+    if [[ "$CLI_IP_CERT_SET" == "1" && "$CERT_MODE" != "acme" ]]; then
+        die "Option --ip is allowed only together with --cert-mode acme"
+    fi
+    if [[ "$domain_option_set" == "1" && "$CLI_IP_CERT_SET" == "1" ]]; then
+        die "Options --domain and --ip are mutually exclusive"
     fi
 
     [[ "$(id -u)" -eq 0 ]] || die "This script must be run as root"
@@ -1165,7 +1205,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/constants.sh"
+# shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/utils.sh"
 
 [[ -f "$SCRIPT_DIR/config.conf" ]] && parse_config_file "$SCRIPT_DIR/config.conf"
@@ -1189,7 +1231,7 @@ init_config() {
 
     domain=""
     if [[ "$cert_mode" == "acme" ]]; then
-        read -r -p "Domain for ACME: " domain
+        read -r -p "Domain or IP for ACME (domain ~90 days, IP ~6 days): " domain
     fi
 
     read -r -p "Panel port [2095]: " panel_port
@@ -1237,7 +1279,9 @@ case "${1:-}" in
         ;;
 esac
 
+# shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/actions.sh"
+# shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/commands.sh"
 
 main "$@"
@@ -1249,7 +1293,9 @@ _embed_tpl_acme_cert() {
 #!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck disable=SC1091
 . "$SCRIPT_DIR/../lib/constants.sh"
+# shellcheck disable=SC1091
 . "$SCRIPT_DIR/../lib/utils.sh"
 require_command docker
 load_config_relative "$SCRIPT_DIR"
@@ -1264,9 +1310,14 @@ case "$MODE" in
         docker compose run --rm -p 80:80 --entrypoint sh acme-sh -c 'set -e; acme.sh --cron --home /acme.sh'
         ;;
     issue)
+        acme_flags=""
+        if is_ip "$DOMAIN"; then
+            acme_flags="--server letsencrypt --certificate-profile shortlived --days 6"
+            log_info "Issuing short-lived IP certificate (valid ~6 days)"
+        fi
         log_info "Issuing ACME certificate for $DOMAIN"
         if docker compose run --rm -p 80:80 --entrypoint sh acme-sh \
-                -c "set -e; acme.sh --issue --standalone -d '$DOMAIN' --key-file /certs/server.key --fullchain-file /certs/server.crt --home /acme.sh"; then
+                -c "set -e; acme.sh --issue --standalone -d '$DOMAIN' $acme_flags --key-file /certs/server.key --fullchain-file /certs/server.crt --home /acme.sh"; then
             log_info "Certificate issued successfully"
         else
             die "ACME certificate issuance failed"
@@ -1460,7 +1511,9 @@ _gen_acme() {
 #!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck disable=SC1091
 . "$SCRIPT_DIR/../lib/constants.sh"
+# shellcheck disable=SC1091
 . "$SCRIPT_DIR/../lib/utils.sh"
 require_command docker
 load_config_relative "$SCRIPT_DIR"
@@ -1475,9 +1528,14 @@ case "$MODE" in
         docker compose run --rm -p 80:80 --entrypoint sh acme-sh -c 'set -e; acme.sh --cron --home /acme.sh'
         ;;
     issue)
+        acme_flags=""
+        if is_ip "$DOMAIN"; then
+            acme_flags="--server letsencrypt --certificate-profile shortlived --days 6"
+            log_info "Issuing short-lived IP certificate (valid ~6 days)"
+        fi
         log_info "Issuing ACME certificate for $DOMAIN"
         if docker compose run --rm -p 80:80 --entrypoint sh acme-sh \
-                -c "set -e; acme.sh --issue --standalone -d '$DOMAIN' --key-file /certs/server.key --fullchain-file /certs/server.crt --home /acme.sh"; then
+                -c "set -e; acme.sh --issue --standalone -d '$DOMAIN' $acme_flags --key-file /certs/server.key --fullchain-file /certs/server.crt --home /acme.sh"; then
             log_info "Certificate issued successfully"
         else
             die "ACME certificate issuance failed"
@@ -1582,6 +1640,7 @@ options starts an interactive installation dialog.
 Options:
   --install-dir PATH            Installation directory, default: /opt/s-ui
   --domain DOMAIN               Public domain for ACME mode; ignored for selfsigned.
+  --ip IP                       Public IP for ACME (~6-day short-lived cert; domain ~90 days); ignored for selfsigned.
   --tz TZ                       Time zone written to s-ui settings, optional.
   --timer-on-calendar SPEC      systemd OnCalendar value for renew timer.
   --timer-random-delay SPEC     systemd RandomizedDelaySec value for renew timer.
@@ -1609,6 +1668,9 @@ parse_install_options() {
             --domain)
                 require_option_value "$1" "${2-}"
                 DOMAIN="$2"; domain_option_set="1"; shift 2 ;;
+            --ip)
+                require_option_value "$1" "${2-}"
+                DOMAIN="$2"; CLI_IP_CERT_SET="1"; shift 2 ;;
             --tz)
                 require_option_value "$1" "${2-}" 1
                 TZ="$2"; shift 2 ;;
@@ -1658,8 +1720,14 @@ parse_install_options() {
     if [[ "$domain_option_set" == "1" && "$CERT_MODE" != "acme" ]]; then
         die "Option --domain is allowed only together with --cert-mode acme"
     fi
-    if [[ "$BATCH_INSTALL" == "1" && "$CERT_MODE" == "acme" && "$domain_option_set" != "1" ]]; then
-        die "Non-interactive install with --cert-mode acme requires explicit --domain"
+    if [[ "$CLI_IP_CERT_SET" == "1" && "$CERT_MODE" != "acme" ]]; then
+        die "Option --ip is allowed only together with --cert-mode acme"
+    fi
+    if [[ "$domain_option_set" == "1" && "$CLI_IP_CERT_SET" == "1" ]]; then
+        die "Options --domain and --ip are mutually exclusive"
+    fi
+    if [[ "$BATCH_INSTALL" == "1" && "$CERT_MODE" == "acme" && "$domain_option_set" != "1" && "$CLI_IP_CERT_SET" != "1" ]]; then
+        die "Non-interactive install with --cert-mode acme requires --domain or --ip"
     fi
 }
 

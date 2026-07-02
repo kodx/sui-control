@@ -98,8 +98,16 @@ prepare_effective_settings() {
             systemd-analyze timespan "$TIMER_RANDOM_DELAY" >/dev/null 2>&1 \
                 || die "Invalid systemd RandomizedDelaySec value: $TIMER_RANDOM_DELAY"
         fi
-        validate_domain "$DOMAIN"
-        [[ "$DOMAIN" != "localhost" ]] || die "Domain must not be localhost in acme mode"
+        if is_ip "$DOMAIN"; then
+            is_ipv4 "$DOMAIN" || is_ipv6 "$DOMAIN" || die "Invalid IP address: $DOMAIN"
+            if [[ "$TIMER_ON_CALENDAR" == "$DEFAULT_TIMER_ON_CALENDAR" && "$TIMER_RANDOM_DELAY" == "$DEFAULT_TIMER_RANDOM_DELAY" ]]; then
+                TIMER_ON_CALENDAR="$DEFAULT_TIMER_ON_CALENDAR_IP"
+                TIMER_RANDOM_DELAY="$DEFAULT_TIMER_RANDOM_DELAY_IP"
+            fi
+        else
+            validate_domain "$DOMAIN"
+            [[ "$DOMAIN" != "localhost" ]] || die "Domain must not be localhost in acme mode"
+        fi
     else
         DOMAIN="localhost"
     fi
@@ -250,10 +258,14 @@ prompt_certificate_mode() {
     done
 }
 
-prompt_domain_if_needed() {
+prompt_acme_identifier() {
     if [[ "$CERT_MODE" == "acme" ]]; then
-        DOMAIN="$(prompt_with_default 'Domain for ACME certificate' "${DOMAIN:-panel.example.com}")"
-        validate_domain "$DOMAIN"
+        DOMAIN="$(prompt_with_default 'Domain or IP for ACME (domain ~90 days, IP ~6 days)' "${DOMAIN:-panel.example.com}")"
+        if is_ip "$DOMAIN"; then
+            is_ipv4 "$DOMAIN" || is_ipv6 "$DOMAIN" || die "Invalid IP address: $DOMAIN"
+        else
+            validate_domain "$DOMAIN"
+        fi
     else
         DOMAIN="localhost"
     fi
@@ -263,7 +275,7 @@ show_install_defaults() {
     echo 'Current installation values:'
     echo "  1. Install directory  : $INSTALL_DIR"
     echo "  2. Certificate mode   : $CERT_MODE"
-    echo "  3. Domain             : ${DOMAIN:-(empty)}"
+    echo "  3. ACME identifier    : ${DOMAIN:-(empty)}"
     echo "  4. Time zone          : ${TZ:-(empty)}"
     echo "  5. Panel port         : $SUI_PANEL_PORT"
     echo "  6. Subscription port  : $SUI_SUBSCRIPTION_PORT"
@@ -277,7 +289,7 @@ edit_install_option() {
         1) INSTALL_DIR="$(prompt_with_default 'Install directory' "$INSTALL_DIR")" ;;
         2) CERT_MODE="$(prompt_certificate_mode "$CERT_MODE")"
            [[ "$CERT_MODE" == "selfsigned" ]] && DOMAIN='' ;;
-        3) [[ "$CERT_MODE" == "acme" ]] && prompt_domain_if_needed || echo 'Domain is used only in ACME mode.' ;;
+        3) [[ "$CERT_MODE" == "acme" ]] && prompt_acme_identifier || echo 'Domain is used only in ACME mode.' ;;
         4) TZ="$(prompt_with_default 'Time zone (optional)' "$TZ")" ;;
         5) SUI_PANEL_PORT="$(prompt_with_default 'Panel port' "$SUI_PANEL_PORT")" ;;
         6) SUI_SUBSCRIPTION_PORT="$(prompt_with_default 'Subscription port' "$SUI_SUBSCRIPTION_PORT")" ;;
@@ -295,7 +307,7 @@ run_interactive_installation_dialog() {
         echo
         echo '  1) Change install directory'
         echo '  2) Change certificate mode'
-        echo '  3) Change domain'
+        echo '  3) Change ACME identifier'
         echo '  4) Change time zone'
         echo '  5) Change panel port'
         echo '  6) Change subscription port'
@@ -309,9 +321,13 @@ run_interactive_installation_dialog() {
             9)
                 if [[ "$CERT_MODE" == "acme" ]]; then
                     if [[ -z "$DOMAIN" ]]; then
-                        prompt_domain_if_needed
+                        prompt_acme_identifier
                     else
-                        validate_domain "$DOMAIN"
+                        if is_ip "$DOMAIN"; then
+                            is_ipv4 "$DOMAIN" || is_ipv6 "$DOMAIN" || die "Invalid IP address: $DOMAIN"
+                        else
+                            validate_domain "$DOMAIN"
+                        fi
                     fi
                 else
                     DOMAIN='localhost'

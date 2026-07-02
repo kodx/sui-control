@@ -5,6 +5,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/constants.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/utils.sh"
@@ -30,7 +31,7 @@ init_config() {
 
     domain=""
     if [[ "$cert_mode" == "acme" ]]; then
-        read -r -p "Domain for ACME: " domain
+        read -r -p "Domain or IP for ACME (domain ~90 days, IP ~6 days): " domain
     fi
 
     read -r -p "Panel port [2095]: " panel_port

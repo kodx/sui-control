@@ -17,6 +17,7 @@ options starts an interactive installation dialog.
 Options:
   --install-dir PATH            Installation directory, default: /opt/s-ui
   --domain DOMAIN               Public domain for ACME mode; ignored for selfsigned.
+  --ip IP                       Public IP for ACME (~6-day short-lived cert; domain ~90 days); ignored for selfsigned.
   --tz TZ                       Time zone written to s-ui settings, optional.
   --timer-on-calendar SPEC      systemd OnCalendar value for renew timer.
   --timer-random-delay SPEC     systemd RandomizedDelaySec value for renew timer.
@@ -44,6 +45,9 @@ parse_install_options() {
             --domain)
                 require_option_value "$1" "${2-}"
                 DOMAIN="$2"; domain_option_set="1"; shift 2 ;;
+            --ip)
+                require_option_value "$1" "${2-}"
+                DOMAIN="$2"; CLI_IP_CERT_SET="1"; shift 2 ;;
             --tz)
                 require_option_value "$1" "${2-}" 1
                 TZ="$2"; shift 2 ;;
@@ -93,8 +97,14 @@ parse_install_options() {
     if [[ "$domain_option_set" == "1" && "$CERT_MODE" != "acme" ]]; then
         die "Option --domain is allowed only together with --cert-mode acme"
     fi
-    if [[ "$BATCH_INSTALL" == "1" && "$CERT_MODE" == "acme" && "$domain_option_set" != "1" ]]; then
-        die "Non-interactive install with --cert-mode acme requires explicit --domain"
+    if [[ "$CLI_IP_CERT_SET" == "1" && "$CERT_MODE" != "acme" ]]; then
+        die "Option --ip is allowed only together with --cert-mode acme"
+    fi
+    if [[ "$domain_option_set" == "1" && "$CLI_IP_CERT_SET" == "1" ]]; then
+        die "Options --domain and --ip are mutually exclusive"
+    fi
+    if [[ "$BATCH_INSTALL" == "1" && "$CERT_MODE" == "acme" && "$domain_option_set" != "1" && "$CLI_IP_CERT_SET" != "1" ]]; then
+        die "Non-interactive install with --cert-mode acme requires --domain or --ip"
     fi
 }
 

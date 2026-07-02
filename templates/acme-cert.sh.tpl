@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck disable=SC1091
 . "$SCRIPT_DIR/../lib/constants.sh"
+# shellcheck disable=SC1091
 . "$SCRIPT_DIR/../lib/utils.sh"
 require_command docker
 load_config_relative "$SCRIPT_DIR"
@@ -16,9 +18,14 @@ case "$MODE" in
         docker compose run --rm -p 80:80 --entrypoint sh acme-sh -c 'set -e; acme.sh --cron --home /acme.sh'
         ;;
     issue)
+        acme_flags=""
+        if is_ip "$DOMAIN"; then
+            acme_flags="--server letsencrypt --certificate-profile shortlived --days 6"
+            log_info "Issuing short-lived IP certificate (valid ~6 days)"
+        fi
         log_info "Issuing ACME certificate for $DOMAIN"
         if docker compose run --rm -p 80:80 --entrypoint sh acme-sh \
-                -c "set -e; acme.sh --issue --standalone -d '$DOMAIN' --key-file /certs/server.key --fullchain-file /certs/server.crt --home /acme.sh"; then
+                -c "set -e; acme.sh --issue --standalone -d '$DOMAIN' $acme_flags --key-file /certs/server.key --fullchain-file /certs/server.crt --home /acme.sh"; then
             log_info "Certificate issued successfully"
         else
             die "ACME certificate issuance failed"

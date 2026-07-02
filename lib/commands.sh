@@ -221,6 +221,9 @@ main() {
             --domain)
                 require_option_value "$1" "${2-}"
                 DOMAIN="$2"; domain_option_set="1"; shift 2 ;;
+            --ip)
+                require_option_value "$1" "${2-}"
+                DOMAIN="$2"; CLI_IP_CERT_SET="1"; shift 2 ;;
             --tz)
                 require_option_value "$1" "${2-}" 1
                 TZ="$2"; shift 2 ;;
@@ -270,6 +273,12 @@ main() {
 
     if [[ "$domain_option_set" == "1" && "$CERT_MODE" != "acme" ]]; then
         die "Option --domain is allowed only together with --cert-mode acme"
+    fi
+    if [[ "$CLI_IP_CERT_SET" == "1" && "$CERT_MODE" != "acme" ]]; then
+        die "Option --ip is allowed only together with --cert-mode acme"
+    fi
+    if [[ "$domain_option_set" == "1" && "$CLI_IP_CERT_SET" == "1" ]]; then
+        die "Options --domain and --ip are mutually exclusive"
     fi
 
     [[ "$(id -u)" -eq 0 ]] || die "This script must be run as root"
