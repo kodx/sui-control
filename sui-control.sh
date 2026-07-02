@@ -6,12 +6,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 source "$SCRIPT_DIR/lib/constants.sh"
-
-_gen_lib() {
-    cat "$SCRIPT_DIR/lib/utils.sh"
-}
-
-eval "$(_gen_lib)"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/utils.sh"
 
 [[ -f "$SCRIPT_DIR/config.conf" ]] && parse_config_file "$SCRIPT_DIR/config.conf"
 
@@ -82,7 +78,9 @@ case "${1:-}" in
         ;;
 esac
 
+# shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/actions.sh"
+# shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/commands.sh"
 
 main "$@"

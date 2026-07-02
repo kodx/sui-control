@@ -4,6 +4,9 @@
 # Built by sui-control build.sh
 set -euo pipefail
 
+# === EMBEDDED PROJECT FILES ===
+_embed_lib_constants() {
+    cat <<'EOF__lib_constants'
 # shellcheck shell=bash
 # .editorconfig hint: indent_style = space, indent_size = 4
 # SPDX-License-Identifier: GPL-3.0-or-later
@@ -16,7 +19,6 @@ SCRIPT_VERSION="1.3.0"
 SELF_SCRIPT_NAME="sui-control.sh"
 CONFIG_FILE_NAME="sui-control.conf"
 COMPOSE_FILE_NAME="docker-compose.yml"
-HELPER_LIB_NAME="lib-sui-control.sh"
 ACME_CERT_SCRIPT_NAME="acme-cert.sh"
 DB_CONFIG_SCRIPT_NAME="s-ui-db-configure.sh"
 SYSTEMD_DIR_NAME="systemd"
@@ -80,9 +82,10 @@ CLI_PANEL_PORT_SET=""
 CLI_SUBSCRIPTION_PORT_SET=""
 CLI_PANEL_PATH_SET=""
 CLI_SUBSCRIPTION_PATH_SET=""
-# === SHARED LIBRARY GENERATOR ===
-_gen_lib() {
-    cat <<'EOF_LIB'
+EOF__lib_constants
+}
+_embed_lib_utils() {
+    cat <<'EOF__lib_utils'
 # shellcheck shell=bash
 # .editorconfig hint: indent_style = space, indent_size = 4
 # SPDX-License-Identifier: GPL-3.0-or-later
@@ -302,167 +305,10 @@ stop_sui_container_if_running() {
 ensure_acme_mode() {
     [[ "$CERT_MODE" == "acme" ]] || die "This script requires acme certificate mode; current mode: $CERT_MODE"
 }
-EOF_LIB
+EOF__lib_utils
 }
-
-# Load shared functions
-eval "$(_gen_lib)"
-
-
-_gen_compose() {
-    cat <<EOF__compose
-services:
-  s-ui:
-    image: alireza7/s-ui:latest
-    container_name: s-ui
-    restart: unless-stopped
-    networks:
-      - s-ui
-    ports:
-      - "${SUI_PANEL_PORT}:${SUI_PANEL_PORT}"
-      - "${SUI_SUBSCRIPTION_PORT}:${SUI_SUBSCRIPTION_PORT}"
-    environment:
-      TZ: "${TZ}"
-    volumes:
-      - "${DATA_DIR}:/app/db"
-      - "${CERT_DIR}:/certs"
-
-  acme-sh:
-    image: neilpang/acme.sh:latest
-    container_name: acme-sh
-    profiles: ["tools"]
-    networks:
-      - s-ui
-    volumes:
-      - "${ACME_DIR}:/acme.sh"
-      - "${CERT_DIR}:/certs"
-
-networks:
-  s-ui:
-    driver: bridge
-EOF__compose
-}
-
-_gen_config() {
-    cat <<EOF__config
-install_dir=$(sanitize_conf_value "$INSTALL_DIR")
-domain=$(sanitize_conf_value "$DOMAIN")
-tz=$(sanitize_conf_value "$TZ")
-timer_on_calendar=$(sanitize_conf_value "$TIMER_ON_CALENDAR")
-timer_random_delay=$(sanitize_conf_value "$TIMER_RANDOM_DELAY")
-cert_mode=$(sanitize_conf_value "$CERT_MODE")
-self_signed_days=$(sanitize_conf_value "$SELF_SIGNED_DAYS")
-panel_port=$(sanitize_conf_value "$SUI_PANEL_PORT")
-subscription_port=$(sanitize_conf_value "$SUI_SUBSCRIPTION_PORT")
-panel_path=$(sanitize_conf_value "$SUI_PANEL_PATH")
-subscription_path=$(sanitize_conf_value "$SUI_SUBSCRIPTION_PATH")
-EOF__config
-}
-
-_gen_acme() {
-    cat <<'EOF__acme'
-#!/usr/bin/env bash
-set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-. "$SCRIPT_DIR/lib-sui-control.sh"
-require_command docker
-load_config_relative "$SCRIPT_DIR"
-ensure_acme_mode
-compose_in_install_dir
-check_port_80_free
-stop_sui_container_if_running
-MODE="${1:-renew}"
-case "$MODE" in
-    renew)
-        log_info "Running scheduled ACME renewal check"
-        docker compose run --rm -p 80:80 --entrypoint sh acme-sh -c 'set -e; acme.sh --cron --home /acme.sh'
-        ;;
-    issue)
-        log_info "Issuing ACME certificate for $DOMAIN"
-        if docker compose run --rm -p 80:80 --entrypoint sh acme-sh \
-                -c "set -e; acme.sh --issue --standalone -d '$DOMAIN' --key-file /certs/server.key --fullchain-file /certs/server.crt --home /acme.sh"; then
-            log_info "Certificate issued successfully"
-        else
-            die "ACME certificate issuance failed"
-        fi
-        ;;
-    *)
-        die "Unknown mode: $MODE (expected: renew or issue)"
-        ;;
-esac
-restart_sui_container
-EOF__acme
-}
-
-_gen_db() {
-    cat <<'EOF__db'
-#!/usr/bin/env bash
-set -euo pipefail
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-. "$SCRIPT_DIR/lib-sui-control.sh"
-
-require_command sqlite3
-load_config_relative "$SCRIPT_DIR"
-
-case "$DATA_DIR" in
-    /*) DB_PATH="$DATA_DIR/s-ui.db" ;;
-    *)  DB_PATH="$INSTALL_DIR/${DATA_DIR#./}/s-ui.db" ;;
-esac
-[[ -f "$DB_PATH" ]] || die "Database file not found: $DB_PATH"
-
-USERNAME="${1:-}"
-PASSWORD="${2:-}"
-PANEL_PORT="$SUI_PANEL_PORT"
-SUB_PORT="$SUI_SUBSCRIPTION_PORT"
-PANEL_PATH="$SUI_PANEL_PATH"
-SUB_PATH="$SUI_SUBSCRIPTION_PATH"
-TIME_LOCATION="$TZ"
-
-[[ -n "$USERNAME" ]]   || die "username argument is required"
-[[ -n "$PASSWORD" ]]   || die "password argument is required"
-[[ -n "$PANEL_PORT" ]] || die "panel_port is not set in config"
-[[ -n "$SUB_PORT" ]]   || die "subscription_port is not set in config"
-[[ -n "$PANEL_PATH" ]] || die "panel_path is not set in config"
-[[ -n "$SUB_PATH" ]]   || die "subscription_path is not set in config"
-
-settings_table_exists="$(sqlite3 "$DB_PATH" "SELECT 1 FROM sqlite_master WHERE type='table' AND name='settings' LIMIT 1;")"
-users_table_exists="$(sqlite3 "$DB_PATH" "SELECT 1 FROM sqlite_master WHERE type='table' AND name='users' LIMIT 1;")"
-first_user_rowid="$(sqlite3 "$DB_PATH" "SELECT rowid FROM users ORDER BY rowid LIMIT 1;")"
-[[ "$settings_table_exists" == "1" ]] || die "settings table not found in database: $DB_PATH"
-[[ "$users_table_exists" == "1" ]]    || die "users table not found in database: $DB_PATH"
-[[ -n "$first_user_rowid" ]]          || die "users table is empty: $DB_PATH"
-
-USERNAME_SQL="${USERNAME//\'/\'\'}"
-PASSWORD_SQL="${PASSWORD//\'/\'\'}"
-TIME_LOCATION_SQL="${TIME_LOCATION//\'/\'\'}"
-
-if [[ "$CERT_MODE" == "selfsigned" ]]; then
-    CERT_FILE="/certs/selfsigned/fullchain.pem"
-    KEY_FILE="/certs/selfsigned/privkey.pem"
-else
-    CERT_FILE="/certs/server.crt"
-    KEY_FILE="/certs/server.key"
-fi
-
-sqlite3 "$DB_PATH" <<SQL
-BEGIN TRANSACTION;
-UPDATE settings SET value = '$PANEL_PORT' WHERE key = 'webPort';
-UPDATE settings SET value = '$PANEL_PATH' WHERE key = 'webPath';
-UPDATE settings SET value = '$SUB_PORT'   WHERE key = 'subPort';
-UPDATE settings SET value = '$SUB_PATH'   WHERE key = 'subPath';
-UPDATE settings SET value = '$TIME_LOCATION_SQL' WHERE '$TIME_LOCATION_SQL' <> '' AND key = 'timeLocation';
-UPDATE settings SET value = '$CERT_FILE'  WHERE key = 'webCertFile';
-UPDATE settings SET value = '$KEY_FILE'   WHERE key = 'webKeyFile';
-UPDATE users SET username = '$USERNAME_SQL', password = '$PASSWORD_SQL' WHERE rowid = $first_user_rowid;
-COMMIT;
-SQL
-
-log_info "Database updated: $DB_PATH"
-log_info "Panel path: $PANEL_PATH"
-log_info "Subscription path: $SUB_PATH"
-EOF__db
-}
+_embed_lib_actions() {
+    cat <<'EOF__lib_actions'
 # shellcheck shell=bash
 # .editorconfig hint: indent_style = space, indent_size = 4
 # SPDX-License-Identifier: GPL-3.0-or-later
@@ -975,8 +821,12 @@ print_path_status() {
         echo "$label: missing ($path)"
     fi
 }
-
+EOF__lib_actions
+}
+_embed_lib_commands() {
+    cat <<'EOF__lib_commands'
 # shellcheck shell=bash
+# shellcheck disable=SC2034
 # .editorconfig hint: indent_style = space, indent_size = 4
 # SPDX-License-Identifier: GPL-3.0-or-later
 # CLI commands and entry point
@@ -993,7 +843,6 @@ Usage:
   sui-control.sh <command> [options]
 
 Commands:
-  install                       Install or reinstall s-ui into the target directory.
   init                          Re-initialize runtime artifacts for an existing installation (regenerate certs, restart).
   renew-now                     Renew certificates immediately.
   status                        Show current installation status.
@@ -1052,7 +901,8 @@ show_status() {
     print_path_status 'Compose file'           "$INSTALL_DIR/$COMPOSE_FILE_NAME"
     print_path_status 'Config file'            "$INSTALL_DIR/$CONFIG_FILE_NAME"
     print_path_status 'Control script'         "$INSTALL_DIR/$SELF_SCRIPT_NAME"
-    print_path_status 'Helper library'         "$resolved_bin_dir/$HELPER_LIB_NAME"
+    print_path_status 'Lib constants'          "$INSTALL_DIR/lib/constants.sh"
+    print_path_status 'Lib utils'              "$INSTALL_DIR/lib/utils.sh"
     print_path_status 'DB config script'       "$resolved_bin_dir/$DB_CONFIG_SCRIPT_NAME"
     print_path_status 'Data directory'         "$resolved_data_dir"
     print_path_status 'Certificate directory'  "$resolved_cert_dir"
@@ -1159,120 +1009,6 @@ uninstall_control_script() {
 }
 
 # ----------------------------------------------------------------------
-# Install
-# ----------------------------------------------------------------------
-install_control_script() {
-    CURRENT_COMMAND="install"
-
-    _randomize_if_default SUI_PANEL_PORT        "$DEFAULT_SUI_PANEL_PORT"        CLI_PANEL_PORT_SET        ""               generate_random_port 20000 40000
-    _randomize_if_default SUI_SUBSCRIPTION_PORT "$DEFAULT_SUI_SUBSCRIPTION_PORT" CLI_SUBSCRIPTION_PORT_SET "$SUI_PANEL_PORT" generate_random_port 20000 40000
-    _randomize_if_default SUI_PANEL_PATH        "$DEFAULT_SUI_PANEL_PATH"        CLI_PANEL_PATH_SET        ""               generate_random_path_segment
-    _randomize_if_default SUI_SUBSCRIPTION_PATH "$DEFAULT_SUI_SUBSCRIPTION_PATH" CLI_SUBSCRIPTION_PATH_SET "$SUI_PANEL_PATH" generate_random_path_segment
-
-    if [[ "$BATCH_INSTALL" != "1" ]]; then
-        cat <<'EOF_BANNER'
- ____  _   _ ___     ____            _             _
-/ ___|| | | |_ _|   / ___|___  _ __ | |_ _ __ ___ | |
-\___ \| | | || |   | |   / _ \| '_ \| __| '__/ _ \| |
- ___) | |_| || |   | |__| (_) | | | | |_| | | (_) | |
-|____/ \___/|___|   \____\___/|_| |_|\__|_|  \___/|_|
-EOF_BANNER
-        run_interactive_installation_dialog
-    fi
-
-    [[ -n "$INSTALL_GENERATED_USERNAME" ]] || INSTALL_GENERATED_USERNAME="$(generate_random_alnum 20)"
-    [[ -n "$INSTALL_GENERATED_PASSWORD" ]] || INSTALL_GENERATED_PASSWORD="$(generate_random_alnum 20)"
-
-    prepare_effective_settings
-    check_requirements
-
-    check_tcp_port_free "$SUI_PANEL_PORT"        || die "Panel TCP port is already in use: $SUI_PANEL_PORT"
-    check_tcp_port_free "$SUI_SUBSCRIPTION_PORT" || die "Subscription TCP port is already in use: $SUI_SUBSCRIPTION_PORT"
-
-    if [[ "$CERT_MODE" == "acme" ]]; then
-        local test_image="curlimages/curl:latest"
-        local urls=("https://acme-v02.api.letsencrypt.org/directory" "https://www.google.com/generate_204")
-        local url connected="0"
-        for url in "${urls[@]}"; do
-            if docker run --rm "$test_image" -fsSL --connect-timeout 10 --max-time 20 "$url" >/dev/null 2>&1; then
-                connected="1"
-                break
-            fi
-        done
-        [[ "$connected" == "1" ]] || die "Docker network connectivity check failed for all test endpoints"
-    fi
-
-    local bin_dir
-    bin_dir="$(resolve_path "$INSTALL_DIR" "$BIN_DIR")"
-    mkdir -p "$INSTALL_DIR" \
-        "$bin_dir" \
-        "$(resolve_path "$INSTALL_DIR" "$DATA_DIR")" \
-        "$(resolve_path "$INSTALL_DIR" "$CERT_DIR")" \
-        "$(resolve_path "$INSTALL_DIR" "$ACME_DIR")"
-
-    create_generated_file "$INSTALL_DIR" "$COMPOSE_FILE_NAME" _gen_compose ""     "compose file"
-    create_generated_file "$INSTALL_DIR" "$CONFIG_FILE_NAME"  _gen_config  "0600" "config file"
-
-    local self_file="$INSTALL_DIR/$SELF_SCRIPT_NAME"
-    log_info "Installing control script at: $self_file"
-    if [[ -r "$SCRIPT_PATH" && ! -d "$SCRIPT_PATH" ]]; then
-        cat "$SCRIPT_PATH" > "$self_file"
-    elif [[ -r "/proc/$$/fd/255" ]]; then
-        cat "/proc/$$/fd/255" > "$self_file"
-    elif [[ -r "/dev/fd/255" ]]; then
-        cat "/dev/fd/255" > "$self_file"
-    else
-        die "Cannot access the running script contents to copy itself"
-    fi
-    [[ -s "$self_file" ]] || die "Failed to copy script to $self_file (empty file)"
-    chmod 0755 "$self_file"
-
-    create_generated_file "$bin_dir" "$HELPER_LIB_NAME"     _gen_lib  "0755" "helper library"
-
-    if [[ "$CERT_MODE" == "acme" ]]; then
-        create_generated_file "$bin_dir" "$ACME_CERT_SCRIPT_NAME" _gen_acme "0755" "acme cert script"
-    else
-        rm -f "$bin_dir/$ACME_CERT_SCRIPT_NAME"
-    fi
-
-    create_generated_file "$bin_dir" "$DB_CONFIG_SCRIPT_NAME" _gen_db "0755" "db config script"
-
-    ensure_config_loaded "$INSTALL_DIR"
-
-    local db_script="$bin_dir/$DB_CONFIG_SCRIPT_NAME"
-    local db_path
-    db_path="$(resolve_path "$INSTALL_DIR" "$DATA_DIR")/s-ui.db"
-    [[ -x "$db_script" ]] || die "Database configuration script not found: $db_script"
-
-    cd "$INSTALL_DIR" || die "Cannot cd to $INSTALL_DIR"
-    docker compose up -d --remove-orphans s-ui
-
-    local db_timeout=60 db_elapsed=0
-    log_info "Waiting for s-ui to initialize database (up to ${db_timeout}s)..."
-    while (( db_elapsed < db_timeout )); do
-        [[ -f "$db_path" && -s "$db_path" ]] && break
-        sleep 2
-        db_elapsed=$(( db_elapsed + 2 ))
-    done
-    if [[ ! -f "$db_path" || ! -s "$db_path" ]]; then
-        docker compose logs --no-color s-ui | tail -n 50 >&2 || true
-        die "Database file was not created in time: $db_path"
-    fi
-
-    docker compose stop s-ui
-    [[ -f "$db_path" ]] || die "Database file not found after first start: $db_path"
-    "$db_script" "$INSTALL_GENERATED_USERNAME" "$INSTALL_GENERATED_PASSWORD"
-    docker compose up -d --remove-orphans s-ui
-
-    initialize_runtime_artifacts "$INSTALL_DIR"
-    install_systemd_timer "$INSTALL_DIR"
-
-    log_info "Installation completed"
-    log_info "Generated username: $INSTALL_GENERATED_USERNAME"
-    log_info "Generated password: $INSTALL_GENERATED_PASSWORD"
-}
-
-# ----------------------------------------------------------------------
 # Entry point
 # ----------------------------------------------------------------------
 main() {
@@ -1362,17 +1098,10 @@ main() {
     if [[ "$domain_option_set" == "1" && "$CERT_MODE" != "acme" ]]; then
         die "Option --domain is allowed only together with --cert-mode acme"
     fi
-    if [[ "$COMMAND" == "install" && "$BATCH_INSTALL" == "1" \
-            && "$CERT_MODE" == "acme" && "$domain_option_set" != "1" ]]; then
-        die "Non-interactive install with --cert-mode acme requires explicit --domain"
-    fi
 
     [[ "$(id -u)" -eq 0 ]] || die "This script must be run as root"
 
     case "$COMMAND" in
-        install)
-            install_control_script
-            ;;
         init)
             CURRENT_COMMAND="init"
             ensure_config_loaded "$(get_runtime_install_dir)"
@@ -1425,5 +1154,627 @@ main() {
             ;;
     esac
 }
+EOF__lib_commands
+}
+_embed_entry_point() {
+    cat <<'EOF__entry_point'
+#!/usr/bin/env bash
+# .editorconfig hint: indent_style = space, indent_size = 4
+# SPDX-License-Identifier: GPL-3.0-or-later
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+source "$SCRIPT_DIR/lib/constants.sh"
+source "$SCRIPT_DIR/lib/utils.sh"
+
+[[ -f "$SCRIPT_DIR/config.conf" ]] && parse_config_file "$SCRIPT_DIR/config.conf"
+
+init_config() {
+    local install_dir cert_mode domain panel_port sub_port ans
+
+    if [[ -f "$SCRIPT_DIR/config.conf" ]]; then
+        read -r -p "config.conf already exists. Overwrite? [y/N] " ans
+        [[ "$ans" =~ ^[yY] ]] || { echo "Aborted."; exit 0; }
+    fi
+
+    read -r -p "Install directory [/opt/s-ui]: " install_dir
+    install_dir="${install_dir:-/opt/s-ui}"
+
+    while true; do
+        read -r -p "Certificate mode (selfsigned/acme) [selfsigned]: " cert_mode
+        cert_mode="${cert_mode:-selfsigned}"
+        case "$cert_mode" in selfsigned|acme) break ;; *) echo "Enter selfsigned or acme." ;; esac
+    done
+
+    domain=""
+    if [[ "$cert_mode" == "acme" ]]; then
+        read -r -p "Domain for ACME: " domain
+    fi
+
+    read -r -p "Panel port [2095]: " panel_port
+    panel_port="${panel_port:-2095}"
+
+    read -r -p "Subscription port [2096]: " sub_port
+    sub_port="${sub_port:-2096}"
+
+    cat > "$SCRIPT_DIR/config.conf" <<EOF
+# sui-control user overrides
+install_dir=$install_dir
+cert_mode=$cert_mode
+panel_port=$panel_port
+subscription_port=$sub_port
+EOF
+
+    if [[ -n "$domain" ]]; then
+        echo "domain=$domain" >> "$SCRIPT_DIR/config.conf"
+    fi
+
+    echo "Created $SCRIPT_DIR/config.conf"
+}
+
+prompt_create_config() {
+    local ans
+    echo "config.conf not found — create one with your preferred defaults?"
+    echo "  (You can also run './sui-control.sh init-config' later)"
+    read -r -p "Create config.conf now? [y/N] " ans
+    if [[ "$ans" =~ ^[yY] ]]; then
+        init_config
+    else
+        echo "Using built-in defaults."
+    fi
+}
+
+case "${1:-}" in
+    init-config)
+        init_config
+        exit 0
+        ;;
+    help|-h|--help)
+        ;;
+    *)
+        [[ -f "$SCRIPT_DIR/config.conf" ]] || prompt_create_config
+        ;;
+esac
+
+source "$SCRIPT_DIR/lib/actions.sh"
+source "$SCRIPT_DIR/lib/commands.sh"
 
 main "$@"
+EOF__entry_point
+}
+# --- Template files ---
+_embed_tpl_acme_cert() {
+    cat <<'EOF__tpl_acme_cert'
+#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/../lib/constants.sh"
+. "$SCRIPT_DIR/../lib/utils.sh"
+require_command docker
+load_config_relative "$SCRIPT_DIR"
+ensure_acme_mode
+compose_in_install_dir
+check_port_80_free
+stop_sui_container_if_running
+MODE="${1:-renew}"
+case "$MODE" in
+    renew)
+        log_info "Running scheduled ACME renewal check"
+        docker compose run --rm -p 80:80 --entrypoint sh acme-sh -c 'set -e; acme.sh --cron --home /acme.sh'
+        ;;
+    issue)
+        log_info "Issuing ACME certificate for $DOMAIN"
+        if docker compose run --rm -p 80:80 --entrypoint sh acme-sh \
+                -c "set -e; acme.sh --issue --standalone -d '$DOMAIN' --key-file /certs/server.key --fullchain-file /certs/server.crt --home /acme.sh"; then
+            log_info "Certificate issued successfully"
+        else
+            die "ACME certificate issuance failed"
+        fi
+        ;;
+    *)
+        die "Unknown mode: $MODE (expected: renew or issue)"
+        ;;
+esac
+restart_sui_container
+EOF__tpl_acme_cert
+}
+_embed_tpl_db_config() {
+    cat <<'EOF__tpl_db_config'
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/../lib/constants.sh"
+. "$SCRIPT_DIR/../lib/utils.sh"
+
+require_command sqlite3
+load_config_relative "$SCRIPT_DIR"
+
+case "$DATA_DIR" in
+    /*) DB_PATH="$DATA_DIR/s-ui.db" ;;
+    *)  DB_PATH="$INSTALL_DIR/${DATA_DIR#./}/s-ui.db" ;;
+esac
+[[ -f "$DB_PATH" ]] || die "Database file not found: $DB_PATH"
+
+USERNAME="${1:-}"
+PASSWORD="${2:-}"
+PANEL_PORT="$SUI_PANEL_PORT"
+SUB_PORT="$SUI_SUBSCRIPTION_PORT"
+PANEL_PATH="$SUI_PANEL_PATH"
+SUB_PATH="$SUI_SUBSCRIPTION_PATH"
+TIME_LOCATION="$TZ"
+
+[[ -n "$USERNAME" ]]   || die "username argument is required"
+[[ -n "$PASSWORD" ]]   || die "password argument is required"
+[[ -n "$PANEL_PORT" ]] || die "panel_port is not set in config"
+[[ -n "$SUB_PORT" ]]   || die "subscription_port is not set in config"
+[[ -n "$PANEL_PATH" ]] || die "panel_path is not set in config"
+[[ -n "$SUB_PATH" ]]   || die "subscription_path is not set in config"
+
+settings_table_exists="$(sqlite3 "$DB_PATH" "SELECT 1 FROM sqlite_master WHERE type='table' AND name='settings' LIMIT 1;")"
+users_table_exists="$(sqlite3 "$DB_PATH" "SELECT 1 FROM sqlite_master WHERE type='table' AND name='users' LIMIT 1;")"
+first_user_rowid="$(sqlite3 "$DB_PATH" "SELECT rowid FROM users ORDER BY rowid LIMIT 1;")"
+[[ "$settings_table_exists" == "1" ]] || die "settings table not found in database: $DB_PATH"
+[[ "$users_table_exists" == "1" ]]    || die "users table not found in database: $DB_PATH"
+[[ -n "$first_user_rowid" ]]          || die "users table is empty: $DB_PATH"
+
+USERNAME_SQL="${USERNAME//\'/\'\'}"
+PASSWORD_SQL="${PASSWORD//\'/\'\'}"
+TIME_LOCATION_SQL="${TIME_LOCATION//\'/\'\'}"
+
+if [[ "$CERT_MODE" == "selfsigned" ]]; then
+    CERT_FILE="/certs/selfsigned/fullchain.pem"
+    KEY_FILE="/certs/selfsigned/privkey.pem"
+else
+    CERT_FILE="/certs/server.crt"
+    KEY_FILE="/certs/server.key"
+fi
+
+sqlite3 "$DB_PATH" <<SQL
+BEGIN TRANSACTION;
+UPDATE settings SET value = '$PANEL_PORT' WHERE key = 'webPort';
+UPDATE settings SET value = '$PANEL_PATH' WHERE key = 'webPath';
+UPDATE settings SET value = '$SUB_PORT'   WHERE key = 'subPort';
+UPDATE settings SET value = '$SUB_PATH'   WHERE key = 'subPath';
+UPDATE settings SET value = '$TIME_LOCATION_SQL' WHERE '$TIME_LOCATION_SQL' <> '' AND key = 'timeLocation';
+UPDATE settings SET value = '$CERT_FILE'  WHERE key = 'webCertFile';
+UPDATE settings SET value = '$KEY_FILE'   WHERE key = 'webKeyFile';
+UPDATE users SET username = '$USERNAME_SQL', password = '$PASSWORD_SQL' WHERE rowid = $first_user_rowid;
+COMMIT;
+SQL
+
+log_info "Database updated: $DB_PATH"
+log_info "Panel path: $PANEL_PATH"
+log_info "Subscription path: $SUB_PATH"
+EOF__tpl_db_config
+}
+_embed_tpl_compose() {
+    cat <<'EOF__tpl_compose'
+services:
+  s-ui:
+    image: alireza7/s-ui:latest
+    container_name: s-ui
+    restart: unless-stopped
+    networks:
+      - s-ui
+    ports:
+      - "${SUI_PANEL_PORT}:${SUI_PANEL_PORT}"
+      - "${SUI_SUBSCRIPTION_PORT}:${SUI_SUBSCRIPTION_PORT}"
+    environment:
+      TZ: "${TZ}"
+    volumes:
+      - "${DATA_DIR}:/app/db"
+      - "${CERT_DIR}:/certs"
+
+  acme-sh:
+    image: neilpang/acme.sh:latest
+    container_name: acme-sh
+    profiles: ["tools"]
+    networks:
+      - s-ui
+    volumes:
+      - "${ACME_DIR}:/acme.sh"
+      - "${CERT_DIR}:/certs"
+
+networks:
+  s-ui:
+    driver: bridge
+EOF__tpl_compose
+}
+_embed_tpl_config() {
+    cat <<'EOF__tpl_config'
+install_dir=$(sanitize_conf_value "$INSTALL_DIR")
+domain=$(sanitize_conf_value "$DOMAIN")
+tz=$(sanitize_conf_value "$TZ")
+timer_on_calendar=$(sanitize_conf_value "$TIMER_ON_CALENDAR")
+timer_random_delay=$(sanitize_conf_value "$TIMER_RANDOM_DELAY")
+cert_mode=$(sanitize_conf_value "$CERT_MODE")
+self_signed_days=$(sanitize_conf_value "$SELF_SIGNED_DAYS")
+panel_port=$(sanitize_conf_value "$SUI_PANEL_PORT")
+subscription_port=$(sanitize_conf_value "$SUI_SUBSCRIPTION_PORT")
+panel_path=$(sanitize_conf_value "$SUI_PANEL_PATH")
+subscription_path=$(sanitize_conf_value "$SUI_SUBSCRIPTION_PATH")
+EOF__tpl_config
+}
+
+# === INSTALLER RUNTIME ===
+eval "$(_embed_lib_constants)"
+eval "$(_embed_lib_utils)"
+eval "$(_embed_lib_actions)"
+
+# === RUNTIME FILE GENERATORS ===
+
+_gen_compose() {
+    cat <<EOF__compose
+services:
+  s-ui:
+    image: alireza7/s-ui:latest
+    container_name: s-ui
+    restart: unless-stopped
+    networks:
+      - s-ui
+    ports:
+      - "${SUI_PANEL_PORT}:${SUI_PANEL_PORT}"
+      - "${SUI_SUBSCRIPTION_PORT}:${SUI_SUBSCRIPTION_PORT}"
+    environment:
+      TZ: "${TZ}"
+    volumes:
+      - "${DATA_DIR}:/app/db"
+      - "${CERT_DIR}:/certs"
+
+  acme-sh:
+    image: neilpang/acme.sh:latest
+    container_name: acme-sh
+    profiles: ["tools"]
+    networks:
+      - s-ui
+    volumes:
+      - "${ACME_DIR}:/acme.sh"
+      - "${CERT_DIR}:/certs"
+
+networks:
+  s-ui:
+    driver: bridge
+EOF__compose
+}
+
+_gen_config() {
+    cat <<EOF__config
+install_dir=$(sanitize_conf_value "$INSTALL_DIR")
+domain=$(sanitize_conf_value "$DOMAIN")
+tz=$(sanitize_conf_value "$TZ")
+timer_on_calendar=$(sanitize_conf_value "$TIMER_ON_CALENDAR")
+timer_random_delay=$(sanitize_conf_value "$TIMER_RANDOM_DELAY")
+cert_mode=$(sanitize_conf_value "$CERT_MODE")
+self_signed_days=$(sanitize_conf_value "$SELF_SIGNED_DAYS")
+panel_port=$(sanitize_conf_value "$SUI_PANEL_PORT")
+subscription_port=$(sanitize_conf_value "$SUI_SUBSCRIPTION_PORT")
+panel_path=$(sanitize_conf_value "$SUI_PANEL_PATH")
+subscription_path=$(sanitize_conf_value "$SUI_SUBSCRIPTION_PATH")
+EOF__config
+}
+
+_gen_acme() {
+    cat <<'EOF__acme'
+#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/../lib/constants.sh"
+. "$SCRIPT_DIR/../lib/utils.sh"
+require_command docker
+load_config_relative "$SCRIPT_DIR"
+ensure_acme_mode
+compose_in_install_dir
+check_port_80_free
+stop_sui_container_if_running
+MODE="${1:-renew}"
+case "$MODE" in
+    renew)
+        log_info "Running scheduled ACME renewal check"
+        docker compose run --rm -p 80:80 --entrypoint sh acme-sh -c 'set -e; acme.sh --cron --home /acme.sh'
+        ;;
+    issue)
+        log_info "Issuing ACME certificate for $DOMAIN"
+        if docker compose run --rm -p 80:80 --entrypoint sh acme-sh \
+                -c "set -e; acme.sh --issue --standalone -d '$DOMAIN' --key-file /certs/server.key --fullchain-file /certs/server.crt --home /acme.sh"; then
+            log_info "Certificate issued successfully"
+        else
+            die "ACME certificate issuance failed"
+        fi
+        ;;
+    *)
+        die "Unknown mode: $MODE (expected: renew or issue)"
+        ;;
+esac
+restart_sui_container
+EOF__acme
+}
+
+_gen_db() {
+    cat <<'EOF__db'
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/../lib/constants.sh"
+. "$SCRIPT_DIR/../lib/utils.sh"
+
+require_command sqlite3
+load_config_relative "$SCRIPT_DIR"
+
+case "$DATA_DIR" in
+    /*) DB_PATH="$DATA_DIR/s-ui.db" ;;
+    *)  DB_PATH="$INSTALL_DIR/${DATA_DIR#./}/s-ui.db" ;;
+esac
+[[ -f "$DB_PATH" ]] || die "Database file not found: $DB_PATH"
+
+USERNAME="${1:-}"
+PASSWORD="${2:-}"
+PANEL_PORT="$SUI_PANEL_PORT"
+SUB_PORT="$SUI_SUBSCRIPTION_PORT"
+PANEL_PATH="$SUI_PANEL_PATH"
+SUB_PATH="$SUI_SUBSCRIPTION_PATH"
+TIME_LOCATION="$TZ"
+
+[[ -n "$USERNAME" ]]   || die "username argument is required"
+[[ -n "$PASSWORD" ]]   || die "password argument is required"
+[[ -n "$PANEL_PORT" ]] || die "panel_port is not set in config"
+[[ -n "$SUB_PORT" ]]   || die "subscription_port is not set in config"
+[[ -n "$PANEL_PATH" ]] || die "panel_path is not set in config"
+[[ -n "$SUB_PATH" ]]   || die "subscription_path is not set in config"
+
+settings_table_exists="$(sqlite3 "$DB_PATH" "SELECT 1 FROM sqlite_master WHERE type='table' AND name='settings' LIMIT 1;")"
+users_table_exists="$(sqlite3 "$DB_PATH" "SELECT 1 FROM sqlite_master WHERE type='table' AND name='users' LIMIT 1;")"
+first_user_rowid="$(sqlite3 "$DB_PATH" "SELECT rowid FROM users ORDER BY rowid LIMIT 1;")"
+[[ "$settings_table_exists" == "1" ]] || die "settings table not found in database: $DB_PATH"
+[[ "$users_table_exists" == "1" ]]    || die "users table not found in database: $DB_PATH"
+[[ -n "$first_user_rowid" ]]          || die "users table is empty: $DB_PATH"
+
+USERNAME_SQL="${USERNAME//\'/\'\'}"
+PASSWORD_SQL="${PASSWORD//\'/\'\'}"
+TIME_LOCATION_SQL="${TIME_LOCATION//\'/\'\'}"
+
+if [[ "$CERT_MODE" == "selfsigned" ]]; then
+    CERT_FILE="/certs/selfsigned/fullchain.pem"
+    KEY_FILE="/certs/selfsigned/privkey.pem"
+else
+    CERT_FILE="/certs/server.crt"
+    KEY_FILE="/certs/server.key"
+fi
+
+sqlite3 "$DB_PATH" <<SQL
+BEGIN TRANSACTION;
+UPDATE settings SET value = '$PANEL_PORT' WHERE key = 'webPort';
+UPDATE settings SET value = '$PANEL_PATH' WHERE key = 'webPath';
+UPDATE settings SET value = '$SUB_PORT'   WHERE key = 'subPort';
+UPDATE settings SET value = '$SUB_PATH'   WHERE key = 'subPath';
+UPDATE settings SET value = '$TIME_LOCATION_SQL' WHERE '$TIME_LOCATION_SQL' <> '' AND key = 'timeLocation';
+UPDATE settings SET value = '$CERT_FILE'  WHERE key = 'webCertFile';
+UPDATE settings SET value = '$KEY_FILE'   WHERE key = 'webKeyFile';
+UPDATE users SET username = '$USERNAME_SQL', password = '$PASSWORD_SQL' WHERE rowid = $first_user_rowid;
+COMMIT;
+SQL
+
+log_info "Database updated: $DB_PATH"
+log_info "Panel path: $PANEL_PATH"
+log_info "Subscription path: $SUB_PATH"
+EOF__db
+}
+
+# === INSTALL LOGIC ===
+# shellcheck shell=bash
+# shellcheck disable=SC2034
+# .editorconfig hint: indent_style = space, indent_size = 4
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Install-only functions — not deployed to target
+
+# ----------------------------------------------------------------------
+# Installer help
+# ----------------------------------------------------------------------
+show_install_help() {
+    cat <<'EOF'
+Usage: sui-control-install.sh [options]
+
+Installs s-ui with Docker Compose into the target directory. Running without
+options starts an interactive installation dialog.
+
+Options:
+  --install-dir PATH            Installation directory, default: /opt/s-ui
+  --domain DOMAIN               Public domain for ACME mode; ignored for selfsigned.
+  --tz TZ                       Time zone written to s-ui settings, optional.
+  --timer-on-calendar SPEC      systemd OnCalendar value for renew timer.
+  --timer-random-delay SPEC     systemd RandomizedDelaySec value for renew timer.
+  --cert-mode MODE              Certificate mode: selfsigned or acme.
+  --panel-port PORT             Panel port exposed by docker-compose.
+  --subscription-port PORT      Subscription port exposed by docker-compose.
+  --panel-path PATH             URL path prefix for panel, without leading slash.
+  --subscription-path PATH      URL path prefix for subscriptions, without leading slash.
+  --batch                       Non-interactive install using provided/default values.
+  --yes                         Skip confirmation prompts where possible.
+  -h, --help                    Show this help message.
+EOF
+}
+
+# ----------------------------------------------------------------------
+# CLI option parsing (install-only)
+# ----------------------------------------------------------------------
+parse_install_options() {
+    local domain_option_set="0"
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --install-dir)
+                require_option_value "$1" "${2-}"
+                INSTALL_DIR="$2"; shift 2 ;;
+            --domain)
+                require_option_value "$1" "${2-}"
+                DOMAIN="$2"; domain_option_set="1"; shift 2 ;;
+            --tz)
+                require_option_value "$1" "${2-}" 1
+                TZ="$2"; shift 2 ;;
+            --timer-on-calendar)
+                require_option_value "$1" "${2-}"
+                TIMER_ON_CALENDAR="$2"; shift 2 ;;
+            --timer-random-delay)
+                require_option_value "$1" "${2-}"
+                TIMER_RANDOM_DELAY="$2"; shift 2 ;;
+            --cert-mode)
+                require_option_value "$1" "${2-}"
+                CERT_MODE="$2"; shift 2 ;;
+            --panel-port)
+                require_option_value "$1" "${2-}"
+                SUI_PANEL_PORT="$2"
+                CLI_PANEL_PORT_SET="1"
+                shift 2 ;;
+            --subscription-port)
+                require_option_value "$1" "${2-}"
+                SUI_SUBSCRIPTION_PORT="$2"
+                CLI_SUBSCRIPTION_PORT_SET="1"
+                shift 2 ;;
+            --panel-path)
+                require_option_value "$1" "${2-}"
+                SUI_PANEL_PATH="$2"
+                CLI_PANEL_PATH_SET="1"
+                shift 2 ;;
+            --subscription-path)
+                require_option_value "$1" "${2-}"
+                SUI_SUBSCRIPTION_PATH="$2"
+                CLI_SUBSCRIPTION_PATH_SET="1"
+                shift 2 ;;
+            --batch)
+                BATCH_INSTALL="1"; shift ;;
+            --yes)
+                AUTO_CONFIRM="1"; shift ;;
+            -h|--help)
+                show_install_help; exit 0 ;;
+            *)
+                echo "Unknown option: $1"
+                show_install_help
+                exit 1
+                ;;
+        esac
+    done
+
+    if [[ "$domain_option_set" == "1" && "$CERT_MODE" != "acme" ]]; then
+        die "Option --domain is allowed only together with --cert-mode acme"
+    fi
+    if [[ "$BATCH_INSTALL" == "1" && "$CERT_MODE" == "acme" && "$domain_option_set" != "1" ]]; then
+        die "Non-interactive install with --cert-mode acme requires explicit --domain"
+    fi
+}
+
+# ----------------------------------------------------------------------
+# Install logic
+# ----------------------------------------------------------------------
+install_control_script() {
+    CURRENT_COMMAND="install"
+
+    _randomize_if_default SUI_PANEL_PORT        "$DEFAULT_SUI_PANEL_PORT"        CLI_PANEL_PORT_SET        ""               generate_random_port 20000 40000
+    _randomize_if_default SUI_SUBSCRIPTION_PORT "$DEFAULT_SUI_SUBSCRIPTION_PORT" CLI_SUBSCRIPTION_PORT_SET "$SUI_PANEL_PORT" generate_random_port 20000 40000
+    _randomize_if_default SUI_PANEL_PATH        "$DEFAULT_SUI_PANEL_PATH"        CLI_PANEL_PATH_SET        ""               generate_random_path_segment
+    _randomize_if_default SUI_SUBSCRIPTION_PATH "$DEFAULT_SUI_SUBSCRIPTION_PATH" CLI_SUBSCRIPTION_PATH_SET "$SUI_PANEL_PATH" generate_random_path_segment
+
+    if [[ "$BATCH_INSTALL" != "1" ]]; then
+        cat <<'EOF_BANNER'
+ ____  _   _ ___     ____            _             _
+/ ___|| | | |_ _|   / ___|___  _ __ | |_ _ __ ___ | |
+\___ \| | | || |   | |   / _ \| '_ \| __| '__/ _ \| |
+ ___) | |_| || |   | |__| (_) | | | | |_| | | (_) | |
+|____/ \___/|___|   \____\___/|_| |_|\__|_|  \___/|_|
+EOF_BANNER
+        run_interactive_installation_dialog
+    fi
+
+    [[ -n "$INSTALL_GENERATED_USERNAME" ]] || INSTALL_GENERATED_USERNAME="$(generate_random_alnum 20)"
+    [[ -n "$INSTALL_GENERATED_PASSWORD" ]] || INSTALL_GENERATED_PASSWORD="$(generate_random_alnum 20)"
+
+    prepare_effective_settings
+    check_requirements
+
+    check_tcp_port_free "$SUI_PANEL_PORT"        || die "Panel TCP port is already in use: $SUI_PANEL_PORT"
+    check_tcp_port_free "$SUI_SUBSCRIPTION_PORT" || die "Subscription TCP port is already in use: $SUI_SUBSCRIPTION_PORT"
+
+    if [[ "$CERT_MODE" == "acme" ]]; then
+        local test_image="curlimages/curl:latest"
+        local urls=("https://acme-v02.api.letsencrypt.org/directory" "https://www.google.com/generate_204")
+        local url connected="0"
+        for url in "${urls[@]}"; do
+            if docker run --rm "$test_image" -fsSL --connect-timeout 10 --max-time 20 "$url" >/dev/null 2>&1; then
+                connected="1"
+                break
+            fi
+        done
+        [[ "$connected" == "1" ]] || die "Docker network connectivity check failed for all test endpoints"
+    fi
+
+    local bin_dir
+    # shellcheck disable=SC2153
+    bin_dir="$(resolve_path "$INSTALL_DIR" "$BIN_DIR")"
+    mkdir -p "$INSTALL_DIR" \
+        "$bin_dir" \
+        "$(resolve_path "$INSTALL_DIR" "$DATA_DIR")" \
+        "$(resolve_path "$INSTALL_DIR" "$CERT_DIR")" \
+        "$(resolve_path "$INSTALL_DIR" "$ACME_DIR")" \
+        "$INSTALL_DIR/lib" \
+        "$INSTALL_DIR/templates"
+
+    # Deploy project files (embedded)
+    create_generated_file "$INSTALL_DIR" "lib/constants.sh"              _embed_lib_constants   "0644" "lib constants"
+    create_generated_file "$INSTALL_DIR" "lib/utils.sh"                  _embed_lib_utils       "0644" "lib utils"
+    create_generated_file "$INSTALL_DIR" "lib/actions.sh"                _embed_lib_actions     "0644" "lib actions"
+    create_generated_file "$INSTALL_DIR" "lib/commands.sh"               _embed_lib_commands    "0644" "lib commands"
+    create_generated_file "$INSTALL_DIR" "sui-control.sh"                _embed_entry_point     "0755" "control script"
+    create_generated_file "$INSTALL_DIR" "templates/acme-cert.sh.tpl"         _embed_tpl_acme_cert "0644" "acme template"
+    create_generated_file "$INSTALL_DIR" "templates/s-ui-db-configure.sh.tpl" _embed_tpl_db_config "0644" "db template"
+    create_generated_file "$INSTALL_DIR" "templates/docker-compose.yml.tpl"   _embed_tpl_compose   "0644" "compose template"
+    create_generated_file "$INSTALL_DIR" "templates/sui-control.conf.tpl"    _embed_tpl_config    "0644" "config template"
+
+    # Generate runtime files (with variable substitution)
+    create_generated_file "$INSTALL_DIR" "$COMPOSE_FILE_NAME" _gen_compose ""     "compose file"
+    create_generated_file "$INSTALL_DIR" "$CONFIG_FILE_NAME"  _gen_config  "0600" "config file"
+
+    # Generate bin scripts
+    if [[ "$CERT_MODE" == "acme" ]]; then
+        create_generated_file "$bin_dir" "$ACME_CERT_SCRIPT_NAME" _gen_acme "0755" "acme cert script"
+    fi
+    create_generated_file "$bin_dir" "$DB_CONFIG_SCRIPT_NAME" _gen_db "0755" "db config script"
+
+    ensure_config_loaded "$INSTALL_DIR"
+
+    local db_script="$bin_dir/$DB_CONFIG_SCRIPT_NAME"
+    local db_path
+    db_path="$(resolve_path "$INSTALL_DIR" "$DATA_DIR")/s-ui.db"
+    [[ -x "$db_script" ]] || die "Database configuration script not found: $db_script"
+
+    cd "$INSTALL_DIR" || die "Cannot cd to $INSTALL_DIR"
+    docker compose up -d --remove-orphans s-ui
+
+    local db_timeout=60 db_elapsed=0
+    log_info "Waiting for s-ui to initialize database (up to ${db_timeout}s)..."
+    while (( db_elapsed < db_timeout )); do
+        [[ -f "$db_path" && -s "$db_path" ]] && break
+        sleep 2
+        db_elapsed=$(( db_elapsed + 2 ))
+    done
+    if [[ ! -f "$db_path" || ! -s "$db_path" ]]; then
+        docker compose logs --no-color s-ui | tail -n 50 >&2 || true
+        die "Database file was not created in time: $db_path"
+    fi
+
+    docker compose stop s-ui
+    [[ -f "$db_path" ]] || die "Database file not found after first start: $db_path"
+    "$db_script" "$INSTALL_GENERATED_USERNAME" "$INSTALL_GENERATED_PASSWORD"
+    docker compose up -d --remove-orphans s-ui
+
+    initialize_runtime_artifacts "$INSTALL_DIR"
+    install_systemd_timer "$INSTALL_DIR"
+
+    log_info "Installation completed"
+    log_info "Generated username: $INSTALL_GENERATED_USERNAME"
+    log_info "Generated password: $INSTALL_GENERATED_PASSWORD"
+}
+
+# === ENTRY POINT ===
+parse_install_options "$@"
+[[ "$(id -u)" -eq 0 ]] || die "This script must be run as root"
+install_control_script

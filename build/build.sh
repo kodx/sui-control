@@ -1,10 +1,21 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016
 # SPDX-License-Identifier: GPL-3.0-or-later
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 OUTPUT="$PROJECT_DIR/sui-control-install.sh"
+
+generate_embed_func() {
+    local func_name="$1"
+    local file_path="$2"
+    echo "${func_name}() {"
+    echo "    cat <<'EOF_${func_name##_embed}'"
+    cat "$file_path"
+    echo "EOF_${func_name##_embed}"
+    echo '}'
+}
 
 generate_gen_func() {
     local func_name="$1"
@@ -29,32 +40,41 @@ generate_gen_func() {
     echo "# Built by sui-control build.sh"
     echo 'set -euo pipefail'
     echo
-    cat "$PROJECT_DIR/lib/constants.sh"
 
-    echo '# === SHARED LIBRARY GENERATOR ==='
-    echo '_gen_lib() {'
-    echo "    cat <<'EOF_LIB'"
-    cat "$PROJECT_DIR/lib/utils.sh"
-    echo 'EOF_LIB'
-    echo '}'
+    echo '# === EMBEDDED PROJECT FILES ==='
+    generate_embed_func _embed_lib_constants   "$PROJECT_DIR/lib/constants.sh"
+    generate_embed_func _embed_lib_utils       "$PROJECT_DIR/lib/utils.sh"
+    generate_embed_func _embed_lib_actions     "$PROJECT_DIR/lib/actions.sh"
+    generate_embed_func _embed_lib_commands    "$PROJECT_DIR/lib/commands.sh"
+    generate_embed_func _embed_entry_point     "$PROJECT_DIR/sui-control.sh"
+    echo '# --- Template files ---'
+    generate_embed_func _embed_tpl_acme_cert   "$PROJECT_DIR/templates/acme-cert.sh.tpl"
+    generate_embed_func _embed_tpl_db_config   "$PROJECT_DIR/templates/s-ui-db-configure.sh.tpl"
+    generate_embed_func _embed_tpl_compose     "$PROJECT_DIR/templates/docker-compose.yml.tpl"
+    generate_embed_func _embed_tpl_config      "$PROJECT_DIR/templates/sui-control.conf.tpl"
     echo
 
-    echo '# Load shared functions'
-    # shellcheck disable=SC2016
-    echo 'eval "$(_gen_lib)"'
+    echo '# === INSTALLER RUNTIME ==='
+    echo 'eval "$(_embed_lib_constants)"'
+    echo 'eval "$(_embed_lib_utils)"'
+    echo 'eval "$(_embed_lib_actions)"'
     echo
 
+    echo '# === RUNTIME FILE GENERATORS ==='
     generate_gen_func _gen_compose "$PROJECT_DIR/templates/docker-compose.yml.tpl" 0
     generate_gen_func _gen_config  "$PROJECT_DIR/templates/sui-control.conf.tpl"  0
     generate_gen_func _gen_acme    "$PROJECT_DIR/templates/acme-cert.sh.tpl"       1
     generate_gen_func _gen_db      "$PROJECT_DIR/templates/s-ui-db-configure.sh.tpl" 1
-
-    cat "$PROJECT_DIR/lib/actions.sh"
-    echo
-    cat "$PROJECT_DIR/lib/commands.sh"
     echo
 
-    echo 'main "$@"'
+    echo '# === INSTALL LOGIC ==='
+    cat "$PROJECT_DIR/lib/install.sh"
+    echo
+
+    echo '# === ENTRY POINT ==='
+    echo 'parse_install_options "$@"'
+    echo '[[ "$(id -u)" -eq 0 ]] || die "This script must be run as root"'
+    echo 'install_control_script'
 
 } > "$OUTPUT"
 

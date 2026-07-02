@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-. "$SCRIPT_DIR/lib-sui-control.sh"
+. "$SCRIPT_DIR/../lib/constants.sh"
+. "$SCRIPT_DIR/../lib/utils.sh"
 require_command docker
 load_config_relative "$SCRIPT_DIR"
 ensure_acme_mode
