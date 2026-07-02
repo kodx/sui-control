@@ -19,34 +19,6 @@ require_option_value() {
 }
 
 # ----------------------------------------------------------------------
-# Path utilities
-# ----------------------------------------------------------------------
-resolve_path() {
-    local base_dir="$1"
-    local path="$2"
-    case "$path" in
-        /*) printf '%s\n' "$path" ;;
-        *)  printf '%s\n' "$base_dir/${path#./}" ;;
-    esac
-}
-
-assert_nonempty_value() {
-    local label="$1" value="$2"
-    [[ -n "$value" ]] || die "$label must not be empty"
-}
-
-assert_safe_directory_value() {
-    local label="$1" value="$2"
-    assert_nonempty_value "$label" "$value"
-    case "$value" in
-        /|.|..) die "$label has unsafe value: $value" ;;
-    esac
-    if [[ "$value" == */../* || "$value" == */./* || "$value" == */.. || "$value" == */. ]]; then
-        die "$label contains path traversal sequence: $value"
-    fi
-}
-
-# ----------------------------------------------------------------------
 # Validation
 # ----------------------------------------------------------------------
 validate_domain() {
@@ -83,8 +55,23 @@ validate_url_path_segment() {
         || die "$label contains unsupported characters: $value"
 }
 
+# ----------------------------------------------------------------------
+# Init system detection
+# ----------------------------------------------------------------------
+detect_init_system() {
+    [[ "$INIT_SYSTEM" != "auto" ]] && return
+    if command_exists systemctl;   then INIT_SYSTEM="systemd"; return; fi
+    if command_exists rc-update;   then INIT_SYSTEM="openrc";  return; fi
+    if command_exists runsvdir;    then INIT_SYSTEM="runit";   return; fi
+    if command_exists s6-svscan;   then INIT_SYSTEM="s6";      return; fi
+    if command_exists dinitctl;    then INIT_SYSTEM="dinit";   return; fi
+    INIT_SYSTEM="unsupported"
+}
+
+# ----------------------------------------------------------------------
+# Effective settings
+# ----------------------------------------------------------------------
 prepare_effective_settings() {
-    assert_safe_directory_value "Install directory" "$INSTALL_DIR"
     case "$CERT_MODE" in
         selfsigned|acme) ;;
         *) die "Unsupported certificate mode: $CERT_MODE" ;;
@@ -111,11 +98,6 @@ prepare_effective_settings() {
     else
         DOMAIN="localhost"
     fi
-    assert_safe_directory_value "Bin directory" "$BIN_DIR"
-    assert_safe_directory_value "Data directory" "$DATA_DIR"
-    assert_safe_directory_value "Certificate directory" "$CERT_DIR"
-    assert_safe_directory_value "ACME directory" "$ACME_DIR"
-    assert_safe_directory_value "Systemd directory" "$SYSTEMD_DST_DIR"
     validate_port "Panel port" "$SUI_PANEL_PORT"
     validate_port "Subscription port" "$SUI_SUBSCRIPTION_PORT"
     [[ "$SUI_PANEL_PORT" != "$SUI_SUBSCRIPTION_PORT" ]] \
@@ -130,17 +112,10 @@ prepare_effective_settings() {
 # Config loading (bootstrap version)
 # ----------------------------------------------------------------------
 load_install_config() {
-    local install_dir="$1"
-    local config_file="$install_dir/$CONFIG_FILE_NAME"
+    local config_file="$1"
     # Reset to defaults before applying config values so stale globals do not bleed through.
-    INSTALL_DIR="$DEFAULT_INSTALL_DIR"
     DOMAIN="$DEFAULT_DOMAIN"
     TZ="$DEFAULT_TZ"
-    DATA_DIR="$DEFAULT_DATA_DIR"
-    CERT_DIR="$DEFAULT_CERT_DIR"
-    ACME_DIR="$DEFAULT_ACME_DIR"
-    BIN_DIR="$DEFAULT_BIN_DIR"
-    SYSTEMD_DST_DIR="$DEFAULT_SYSTEMD_DST_DIR"
     TIMER_ON_CALENDAR="$DEFAULT_TIMER_ON_CALENDAR"
     TIMER_RANDOM_DELAY="$DEFAULT_TIMER_RANDOM_DELAY"
     CERT_MODE="$DEFAULT_CERT_MODE"
@@ -150,12 +125,15 @@ load_install_config() {
     SUI_PANEL_PATH="$DEFAULT_SUI_PANEL_PATH"
     SUI_SUBSCRIPTION_PATH="$DEFAULT_SUI_SUBSCRIPTION_PATH"
     parse_config_file "$config_file"
-    RUNTIME_INSTALL_DIR="$INSTALL_DIR"
     prepare_effective_settings
 }
 
 ensure_config_loaded() {
-    [[ -n "${RUNTIME_INSTALL_DIR:-}" ]] || load_install_config "$1"
+    local config_file="${1:-$CONFIG_DIR/$CONFIG_FILE_NAME}"
+    if [[ -z "${CONFIG_LOADED:-}" ]]; then
+        load_install_config "$config_file"
+        CONFIG_LOADED="1"
+    fi
 }
 
 # ----------------------------------------------------------------------
@@ -169,8 +147,9 @@ check_requirements() {
             require_command sqlite3 tr head grep awk
             [[ "$CERT_MODE" != "selfsigned" ]] || require_command openssl
             if [[ "$CERT_MODE" == "acme" ]]; then
-                command_exists systemctl \
-                    || log_warn "systemctl not found; install will continue but the automatic renewal timer cannot be installed"
+                detect_init_system
+                [[ "$INIT_SYSTEM" != "unsupported" ]] \
+                    || log_warn "No supported init system found; renewal timer will not be auto-activated"
             fi
             ;;
         init)
@@ -273,28 +252,26 @@ prompt_acme_identifier() {
 
 show_install_defaults() {
     echo 'Current installation values:'
-    echo "  1. Install directory  : $INSTALL_DIR"
-    echo "  2. Certificate mode   : $CERT_MODE"
-    echo "  3. ACME identifier    : ${DOMAIN:-(empty)}"
-    echo "  4. Time zone          : ${TZ:-(empty)}"
-    echo "  5. Panel port         : $SUI_PANEL_PORT"
-    echo "  6. Subscription port  : $SUI_SUBSCRIPTION_PORT"
-    echo "  7. Panel path         : /$SUI_PANEL_PATH/"
-    echo "  8. Subscription path  : /$SUI_SUBSCRIPTION_PATH/"
+    echo "  1. Certificate mode   : $CERT_MODE"
+    echo "  2. ACME identifier    : ${DOMAIN:-(empty)}"
+    echo "  3. Time zone          : ${TZ:-(empty)}"
+    echo "  4. Panel port         : $SUI_PANEL_PORT"
+    echo "  5. Subscription port  : $SUI_SUBSCRIPTION_PORT"
+    echo "  6. Panel path         : /$SUI_PANEL_PATH/"
+    echo "  7. Subscription path  : /$SUI_SUBSCRIPTION_PATH/"
 }
 
 edit_install_option() {
     local option="$1"
     case "$option" in
-        1) INSTALL_DIR="$(prompt_with_default 'Install directory' "$INSTALL_DIR")" ;;
-        2) CERT_MODE="$(prompt_certificate_mode "$CERT_MODE")"
+        1) CERT_MODE="$(prompt_certificate_mode "$CERT_MODE")"
            [[ "$CERT_MODE" == "selfsigned" ]] && DOMAIN='' ;;
-        3) [[ "$CERT_MODE" == "acme" ]] && prompt_acme_identifier || echo 'Domain is used only in ACME mode.' ;;
-        4) TZ="$(prompt_with_default 'Time zone (optional)' "$TZ")" ;;
-        5) SUI_PANEL_PORT="$(prompt_with_default 'Panel port' "$SUI_PANEL_PORT")" ;;
-        6) SUI_SUBSCRIPTION_PORT="$(prompt_with_default 'Subscription port' "$SUI_SUBSCRIPTION_PORT")" ;;
-        7) SUI_PANEL_PATH="$(prompt_with_default 'Panel path' "$SUI_PANEL_PATH")" ;;
-        8) SUI_SUBSCRIPTION_PATH="$(prompt_with_default 'Subscription path' "$SUI_SUBSCRIPTION_PATH")" ;;
+        2) [[ "$CERT_MODE" == "acme" ]] && prompt_acme_identifier || echo 'Domain is used only in ACME mode.' ;;
+        3) TZ="$(prompt_with_default 'Time zone (optional)' "$TZ")" ;;
+        4) SUI_PANEL_PORT="$(prompt_with_default 'Panel port' "$SUI_PANEL_PORT")" ;;
+        5) SUI_SUBSCRIPTION_PORT="$(prompt_with_default 'Subscription port' "$SUI_SUBSCRIPTION_PORT")" ;;
+        6) SUI_PANEL_PATH="$(prompt_with_default 'Panel path' "$SUI_PANEL_PATH")" ;;
+        7) SUI_SUBSCRIPTION_PATH="$(prompt_with_default 'Subscription path' "$SUI_SUBSCRIPTION_PATH")" ;;
         *) return 1 ;;
     esac
 }
@@ -305,20 +282,19 @@ run_interactive_installation_dialog() {
         echo
         show_install_defaults
         echo
-        echo '  1) Change install directory'
-        echo '  2) Change certificate mode'
-        echo '  3) Change ACME identifier'
-        echo '  4) Change time zone'
-        echo '  5) Change panel port'
-        echo '  6) Change subscription port'
-        echo '  7) Change panel path'
-        echo '  8) Change subscription path'
-        echo '  9) Continue installation'
-        read -r -p 'Choose action [9]: ' action || true
-        action="${action:-9}"
+        echo '  1) Change certificate mode'
+        echo '  2) Change ACME identifier'
+        echo '  3) Change time zone'
+        echo '  4) Change panel port'
+        echo '  5) Change subscription port'
+        echo '  6) Change panel path'
+        echo '  7) Change subscription path'
+        echo '  8) Continue installation'
+        read -r -p 'Choose action [8]: ' action || true
+        action="${action:-8}"
         case "$action" in
-            1|2|3|4|5|6|7|8) edit_install_option "$action" ;;
-            9)
+            1|2|3|4|5|6|7) edit_install_option "$action" ;;
+            8)
                 if [[ "$CERT_MODE" == "acme" ]]; then
                     if [[ -z "$DOMAIN" ]]; then
                         prompt_acme_identifier
@@ -334,7 +310,7 @@ run_interactive_installation_dialog() {
                 fi
                 break
                 ;;
-            *) echo 'Enter 1..9.' ;;
+            *) echo 'Enter 1..8.' ;;
         esac
     done
 }
@@ -349,10 +325,9 @@ sanitize_conf_value() {
 }
 
 generate_self_signed_cert() {
-    local install_dir="$1"
     local cert_root cert_cn tmp_conf
     require_command openssl
-    cert_root="$(resolve_path "$install_dir" "$CERT_DIR")/$SELF_SIGNED_DIR_NAME"
+    cert_root="$RUNTIME_CERT_DIR/$SELF_SIGNED_DIR_NAME"
     cert_cn="${DOMAIN:-localhost}"
     tmp_conf="$(mktemp)"
     # shellcheck disable=SC2064
@@ -405,35 +380,73 @@ create_generated_file() {
 }
 
 # ----------------------------------------------------------------------
-# Systemd timer management
+# Container lifecycle (service commands)
 # ----------------------------------------------------------------------
-install_systemd_timer() {
-    local install_dir="$1"
-    ensure_config_loaded "$install_dir"
-    if [[ "$CERT_MODE" != "acme" ]]; then
-        log_warn "Systemd renewal service is only needed in acme mode"
-        return
-    fi
-    local service_dir="$INSTALL_DIR/$SYSTEMD_DIR_NAME"
-    local service_file="$service_dir/$SYSTEMD_SERVICE_NAME"
-    local timer_file="$service_dir/$SYSTEMD_TIMER_NAME"
-    local resolved_bin_dir
-    resolved_bin_dir="$(resolve_path "$INSTALL_DIR" "$BIN_DIR")"
+assert_nonempty_value() {
+    local label="$1" value="$2"
+    [[ -n "$value" ]] || die "$label must not be empty"
+}
+
+start_containers() {
+    compose_in_dir "$CONFIG_DIR"
+    docker compose up -d --remove-orphans
+}
+
+stop_containers() {
+    compose_in_dir "$CONFIG_DIR"
+    docker compose stop
+}
+
+restart_containers() {
+    compose_in_dir "$CONFIG_DIR"
+    docker compose restart
+}
+
+# ----------------------------------------------------------------------
+# Timer system — systemd
+# ----------------------------------------------------------------------
+_install_timer_systemd() {
+    local service_dir="$RUNTIME_SYSTEMD_DIR"
+    local control_service_file="$service_dir/$SYSTEMD_CONTROL_SERVICE_NAME"
+    local renew_service_file="$service_dir/$SYSTEMD_RENEW_SERVICE_NAME"
+    local timer_file="$service_dir/$SYSTEMD_RENEW_TIMER_NAME"
     mkdir -p "$service_dir"
-    cat > "$service_file" <<EOF_SERVICE
+
+    # Control service (start/stop at boot)
+    cat > "$control_service_file" <<EOF_CONTROL
 [Unit]
-Description=s-ui certificate renewal
+Description=SUI-Control
 After=docker.service network-online.target
 Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=$resolved_bin_dir/$ACME_CERT_SCRIPT_NAME renew
+RemainAfterExit=yes
+ExecStart=$PACKAGE_DIR/sui-control.sh start
+ExecStop=$PACKAGE_DIR/sui-control.sh stop
 User=root
 
 [Install]
 WantedBy=multi-user.target
-EOF_SERVICE
+EOF_CONTROL
+
+    # Renew service (called by timer)
+    cat > "$renew_service_file" <<EOF_RENEW
+[Unit]
+Description=SUI-Control certificate renewal
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$PACKAGE_DIR/sui-control.sh renew
+User=root
+
+[Install]
+WantedBy=multi-user.target
+EOF_RENEW
+
+    # Timer
     cat > "$timer_file" <<EOF_TIMER
 [Unit]
 Description=Run s-ui certificate renewal periodically
@@ -442,82 +455,268 @@ Description=Run s-ui certificate renewal periodically
 OnCalendar=$TIMER_ON_CALENDAR
 RandomizedDelaySec=$TIMER_RANDOM_DELAY
 Persistent=true
-Unit=$SYSTEMD_SERVICE_NAME
+Unit=$SYSTEMD_RENEW_SERVICE_NAME
 
 [Install]
 WantedBy=timers.target
 EOF_TIMER
+
     if ! command_exists systemctl; then
         log_warn "systemctl not found; unit files written to $service_dir but not activated"
         return
     fi
-    local service_link="$SYSTEMD_DST_DIR/$SYSTEMD_SERVICE_NAME"
-    local timer_link="$SYSTEMD_DST_DIR/$SYSTEMD_TIMER_NAME"
+    local control_link="$SYSTEMD_DST_DIR/$SYSTEMD_CONTROL_SERVICE_NAME"
+    local renew_svc_link="$SYSTEMD_DST_DIR/$SYSTEMD_RENEW_SERVICE_NAME"
+    local timer_link="$SYSTEMD_DST_DIR/$SYSTEMD_RENEW_TIMER_NAME"
     mkdir -p "$SYSTEMD_DST_DIR"
-    ln -sfn "$service_file" "$service_link"
-    ln -sfn "$timer_file"   "$timer_link"
+    ln -sfn "$control_service_file" "$control_link"
+    ln -sfn "$renew_service_file"   "$renew_svc_link"
+    ln -sfn "$timer_file"           "$timer_link"
     systemctl daemon-reload
-    systemctl enable --now "$SYSTEMD_TIMER_NAME"
+    systemctl enable --now "$SYSTEMD_CONTROL_SERVICE_NAME"  >/dev/null 2>&1 || true
+    systemctl enable --now "$SYSTEMD_RENEW_TIMER_NAME"
 }
 
-remove_systemd_timer() {
-    local install_dir="$1"
-    local service_link timer_link
-    ensure_config_loaded "$install_dir"
-    service_link="$SYSTEMD_DST_DIR/$SYSTEMD_SERVICE_NAME"
-    timer_link="$SYSTEMD_DST_DIR/$SYSTEMD_TIMER_NAME"
-    if ! command_exists systemctl; then
-        rm -f "$service_link" "$timer_link"
-        return
+_remove_timer_systemd() {
+    local control_link="$SYSTEMD_DST_DIR/$SYSTEMD_CONTROL_SERVICE_NAME"
+    local renew_svc_link="$SYSTEMD_DST_DIR/$SYSTEMD_RENEW_SERVICE_NAME"
+    local timer_link="$SYSTEMD_DST_DIR/$SYSTEMD_RENEW_TIMER_NAME"
+    if command_exists systemctl; then
+        systemctl disable --now "$SYSTEMD_CONTROL_SERVICE_NAME" >/dev/null 2>&1 || true
+        systemctl disable --now "$SYSTEMD_RENEW_TIMER_NAME"     >/dev/null 2>&1 || true
+        systemctl stop "$SYSTEMD_RENEW_SERVICE_NAME"            >/dev/null 2>&1 || true
     fi
-    systemctl disable --now "$SYSTEMD_TIMER_NAME"  >/dev/null 2>&1 || true
-    systemctl stop         "$SYSTEMD_SERVICE_NAME" >/dev/null 2>&1 || true
-    rm -f "$service_link" "$timer_link"
-    systemctl daemon-reload
+    rm -f "$control_link" "$renew_svc_link" "$timer_link"
+    command_exists systemctl && systemctl daemon-reload || true
+}
+
+# ----------------------------------------------------------------------
+# Timer system — OpenRC
+# ----------------------------------------------------------------------
+_install_timer_openrc() {
+    local init_file="/etc/init.d/sui-control"
+    cat > "$init_file" <<'OPENRC_INIT'
+#!/sbin/openrc-run
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+description="SUI-Control"
+
+command="/opt/s-ui/sui-control.sh"
+command_args=""
+pidfile="/run/${RC_SVCNAME}.pid"
+
+depend() {
+    need net
+    use docker
+}
+
+start() {
+    ebegin "Starting s-ui"
+    start-stop-daemon --start --exec /opt/s-ui/sui-control.sh -- start
+    eend $?
+}
+
+stop() {
+    ebegin "Stopping s-ui"
+    start-stop-daemon --stop --exec /opt/s-ui/sui-control.sh
+    /opt/s-ui/sui-control.sh stop
+    eend $?
+}
+OPENRC_INIT
+    chmod 0755 "$init_file"
+
+    _create_cron_job
+    command_exists rc-update && rc-update add sui-control default || true
+}
+
+_remove_timer_openrc() {
+    command_exists rc-update && rc-update del sui-control default >/dev/null 2>&1 || true
+    rm -f "/etc/init.d/sui-control"
+    _remove_cron_job
+}
+
+# ----------------------------------------------------------------------
+# Timer system — runit
+# ----------------------------------------------------------------------
+_install_timer_runit() {
+    local sv_dir="/etc/sv/sui-control"
+    mkdir -p "$sv_dir"
+    cat > "$sv_dir/run" <<'RUNIT_RUN'
+#!/bin/sh
+exec /opt/s-ui/sui-control.sh start
+RUNIT_RUN
+    chmod 0755 "$sv_dir/run"
+
+    cat > "$sv_dir/finish" <<'RUNIT_FINISH'
+#!/bin/sh
+exec /opt/s-ui/sui-control.sh stop
+RUNIT_FINISH
+    chmod 0755 "$sv_dir/finish"
+
+    _create_cron_job
+    mkdir -p /etc/service
+    ln -sfn "$sv_dir" "/etc/service/sui-control" 2>/dev/null || true
+}
+
+_remove_timer_runit() {
+    rm -f "/etc/service/sui-control"
+    rm -rf "/etc/sv/sui-control"
+    _remove_cron_job
+}
+
+# ----------------------------------------------------------------------
+# Timer system — s6
+# ----------------------------------------------------------------------
+_install_timer_s6() {
+    local sv_dir="/etc/s6/sui-control"
+    mkdir -p "$sv_dir"
+    cat > "$sv_dir/run" <<'S6_RUN'
+#!/bin/execlineb -P
+/opt/s-ui/sui-control.sh start
+S6_RUN
+    chmod 0755 "$sv_dir/run"
+
+    _create_cron_job
+    mkdir -p /etc/s6
+    ln -sfn "$sv_dir" "/etc/s6/service" 2>/dev/null || true
+}
+
+_remove_timer_s6() {
+    rm -rf "/etc/s6/sui-control"
+    _remove_cron_job
+}
+
+# ----------------------------------------------------------------------
+# Timer system — dinit
+# ----------------------------------------------------------------------
+_install_timer_dinit() {
+    local sv_file="/etc/dinit.d/sui-control"
+    cat > "$sv_file" <<DINIT_SVC
+type = process
+command = /opt/s-ui/sui-control.sh start
+stop-command = /opt/s-ui/sui-control.sh stop
+restart-command = /opt/s-ui/sui-control.sh restart
+
+depends-on = docker
+waits-for = docker
+DINIT_SVC
+
+    _create_cron_job
+    command_exists dinitctl && dinitctl enable sui-control || true
+}
+
+_remove_timer_dinit() {
+    command_exists dinitctl && dinitctl disable sui-control >/dev/null 2>&1 || true
+    rm -f "/etc/dinit.d/sui-control"
+    _remove_cron_job
+}
+
+# ----------------------------------------------------------------------
+# Cron helper
+# ----------------------------------------------------------------------
+_systemd_oncalendar_to_cron() {
+    local cal="$1" day_part time_part hour min
+    case "$cal" in
+        daily|weekly|monthly|yearly|annually|@*)
+            case "$cal" in
+                daily)     printf '%s\n' '@daily' ;;
+                weekly)    printf '%s\n' '@weekly' ;;
+                monthly)   printf '%s\n' '@monthly' ;;
+                yearly|annually) printf '%s\n' '@yearly' ;;
+                *)         printf '%s\n' "$cal" ;;
+            esac
+            return ;;
+    esac
+    day_part="${cal%% *}"
+    time_part="${cal##* }"
+    hour="${time_part%%:*}"
+    min="${time_part#*:}"; min="${min%%:*}"
+    case "$day_part" in
+        Mon)     printf '%s %s * * 1\n' "$min" "$hour" ;;
+        Sat,Sun) printf '%s %s * * 0,6\n' "$min" "$hour" ;;
+        *)       printf '%s %s * * *\n' "$min" "$hour" ;;
+    esac
+}
+
+_create_cron_job() {
+    local cron_file="$CRON_DST_DIR/$CRON_FILE_NAME"
+    local cron_schedule
+    cron_schedule="$(_systemd_oncalendar_to_cron "$TIMER_ON_CALENDAR")"
+    mkdir -p "$CRON_DST_DIR"
+    cat > "$cron_file" <<CRONEOF
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+$cron_schedule root $PACKAGE_DIR/sui-control.sh renew
+CRONEOF
+    chmod 0644 "$cron_file"
+}
+
+_remove_cron_job() {
+    rm -f "$CRON_DST_DIR/$CRON_FILE_NAME"
+}
+
+# ----------------------------------------------------------------------
+# Timer dispatcher
+# ----------------------------------------------------------------------
+install_renewal_timer() {
+    detect_init_system
+    case "$INIT_SYSTEM" in
+        systemd) _install_timer_systemd ;;
+        openrc)  _install_timer_openrc  ;;
+        runit)   _install_timer_runit   ;;
+        s6)      _install_timer_s6      ;;
+        dinit)   _install_timer_dinit   ;;
+        *)
+            log_warn "No supported init system found; creating cron job only"
+            _create_cron_job
+            ;;
+    esac
+}
+
+remove_renewal_timer() {
+    detect_init_system
+    case "$INIT_SYSTEM" in
+        systemd) _remove_timer_systemd ;;
+        openrc)  _remove_timer_openrc  ;;
+        runit)   _remove_timer_runit   ;;
+        s6)      _remove_timer_s6      ;;
+        dinit)   _remove_timer_dinit   ;;
+        *)       _remove_cron_job      ;;
+    esac
 }
 
 # ----------------------------------------------------------------------
 # Runtime artifact initialization and certificate renewal
 # ----------------------------------------------------------------------
 initialize_runtime_artifacts() {
-    local install_dir="$1"
     local resolved_bin_dir
-    ensure_config_loaded "$install_dir"
-    cd "$INSTALL_DIR" || die "Cannot cd to $INSTALL_DIR"
-    [[ -f "$COMPOSE_FILE_NAME" ]] || die "Compose file not found: $INSTALL_DIR/$COMPOSE_FILE_NAME"
-    resolved_bin_dir="$(resolve_path "$INSTALL_DIR" "$BIN_DIR")"
+    ensure_config_loaded
+    compose_in_dir "$CONFIG_DIR"
+    resolved_bin_dir="$RUNTIME_BIN_DIR"
     if [[ "$CERT_MODE" == "selfsigned" ]]; then
-        generate_self_signed_cert "$INSTALL_DIR"
-        restart_sui_container "$INSTALL_DIR"
+        generate_self_signed_cert
+        restart_sui_container
     elif [[ "$CERT_MODE" == "acme" ]]; then
         "$resolved_bin_dir/$ACME_CERT_SCRIPT_NAME" issue
     fi
 }
 
 renew_certificate() {
-    local install_dir="$1"
     local resolved_bin_dir
-    ensure_config_loaded "$install_dir"
-    resolved_bin_dir="$(resolve_path "$INSTALL_DIR" "$BIN_DIR")"
+    ensure_config_loaded
+    resolved_bin_dir="$RUNTIME_BIN_DIR"
     if [[ "$CERT_MODE" == "selfsigned" ]]; then
-        generate_self_signed_cert "$INSTALL_DIR"
-        restart_sui_container "$INSTALL_DIR"
+        generate_self_signed_cert
+        restart_sui_container
         return
     fi
     "$resolved_bin_dir/$ACME_CERT_SCRIPT_NAME" renew
 }
 
 # ----------------------------------------------------------------------
-# Status display
+# Status display helpers
 # ----------------------------------------------------------------------
-get_runtime_install_dir() {
-    if [[ -n "${RUNTIME_INSTALL_DIR:-}" ]]; then
-        printf '%s\n' "$RUNTIME_INSTALL_DIR"
-    else
-        printf '%s\n' "$SCRIPT_DIR"
-    fi
-}
-
 print_path_status() {
     local label="$1" path="$2"
     if [[ -e "$path" ]]; then

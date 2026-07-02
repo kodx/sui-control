@@ -1,17 +1,15 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2154
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-. "$SCRIPT_DIR/../lib/constants.sh"
-. "$SCRIPT_DIR/../lib/utils.sh"
+PACKAGE_DIR="${PACKAGE_DIR}"
+. "$PACKAGE_DIR/lib/constants.sh"
+. "$PACKAGE_DIR/lib/utils.sh"
 
 require_command sqlite3
-load_config_relative "$SCRIPT_DIR"
+ensure_config_loaded
 
-case "$DATA_DIR" in
-    /*) DB_PATH="$DATA_DIR/s-ui.db" ;;
-    *)  DB_PATH="$INSTALL_DIR/${DATA_DIR#./}/s-ui.db" ;;
-esac
+DB_PATH="$RUNTIME_DATA_DIR/s-ui.db"
 [[ -f "$DB_PATH" ]] || die "Database file not found: $DB_PATH"
 
 USERNAME="${1:-}"

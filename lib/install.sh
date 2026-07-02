@@ -11,11 +11,10 @@ show_install_help() {
     cat <<'EOF'
 Usage: sui-control-install.sh [options]
 
-Installs s-ui with Docker Compose into the target directory. Running without
-options starts an interactive installation dialog.
+Installs s-ui with Docker Compose. Running without options starts an
+interactive installation dialog.
 
 Options:
-  --install-dir PATH            Installation directory, default: /opt/s-ui
   --domain DOMAIN               Public domain for ACME mode; ignored for selfsigned.
   --ip IP                       Public IP for ACME (~6-day short-lived cert; domain ~90 days); ignored for selfsigned.
   --tz TZ                       Time zone written to s-ui settings, optional.
@@ -39,9 +38,6 @@ parse_install_options() {
     local domain_option_set="0"
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --install-dir)
-                require_option_value "$1" "${2-}"
-                INSTALL_DIR="$2"; shift 2 ;;
             --domain)
                 require_option_value "$1" "${2-}"
                 DOMAIN="$2"; domain_option_set="1"; shift 2 ;;
@@ -152,46 +148,50 @@ EOF_BANNER
         [[ "$connected" == "1" ]] || die "Docker network connectivity check failed for all test endpoints"
     fi
 
-    local bin_dir
-    # shellcheck disable=SC2153
-    bin_dir="$(resolve_path "$INSTALL_DIR" "$BIN_DIR")"
-    mkdir -p "$INSTALL_DIR" \
-        "$bin_dir" \
-        "$(resolve_path "$INSTALL_DIR" "$DATA_DIR")" \
-        "$(resolve_path "$INSTALL_DIR" "$CERT_DIR")" \
-        "$(resolve_path "$INSTALL_DIR" "$ACME_DIR")" \
-        "$INSTALL_DIR/lib" \
-        "$INSTALL_DIR/templates"
+    PACKAGE_DIR="/opt/s-ui"
+    resolve_layout
 
-    # Deploy project files (embedded)
-    create_generated_file "$INSTALL_DIR" "lib/constants.sh"              _embed_lib_constants   "0644" "lib constants"
-    create_generated_file "$INSTALL_DIR" "lib/utils.sh"                  _embed_lib_utils       "0644" "lib utils"
-    create_generated_file "$INSTALL_DIR" "lib/actions.sh"                _embed_lib_actions     "0644" "lib actions"
-    create_generated_file "$INSTALL_DIR" "lib/commands.sh"               _embed_lib_commands    "0644" "lib commands"
-    create_generated_file "$INSTALL_DIR" "sui-control.sh"                _embed_entry_point     "0755" "control script"
-    create_generated_file "$INSTALL_DIR" "templates/acme-cert.sh.tpl"         _embed_tpl_acme_cert "0644" "acme template"
-    create_generated_file "$INSTALL_DIR" "templates/s-ui-db-configure.sh.tpl" _embed_tpl_db_config "0644" "db template"
-    create_generated_file "$INSTALL_DIR" "templates/docker-compose.yml.tpl"   _embed_tpl_compose   "0644" "compose template"
-    create_generated_file "$INSTALL_DIR" "templates/sui-control.conf.tpl"    _embed_tpl_config    "0644" "config template"
+    mkdir -p "$PACKAGE_DIR" \
+        "$PACKAGE_DIR/lib" \
+        "$PACKAGE_DIR/templates" \
+        "$CONFIG_DIR" \
+        "$RUNTIME_BIN_DIR" \
+        "$RUNTIME_DATA_DIR" \
+        "$RUNTIME_CERT_DIR" \
+        "$RUNTIME_ACME_DIR" \
+        "$RUNTIME_SYSTEMD_DIR"
 
-    # Generate runtime files (with variable substitution)
-    create_generated_file "$INSTALL_DIR" "$COMPOSE_FILE_NAME" _gen_compose ""     "compose file"
-    create_generated_file "$INSTALL_DIR" "$CONFIG_FILE_NAME"  _gen_config  "0600" "config file"
+    # Deploy package files (embedded)
+    create_generated_file "$PACKAGE_DIR" "lib/constants.sh"              _embed_lib_constants   "0644" "lib constants"
+    create_generated_file "$PACKAGE_DIR" "lib/utils.sh"                  _embed_lib_utils       "0644" "lib utils"
+    create_generated_file "$PACKAGE_DIR" "lib/actions.sh"                _embed_lib_actions     "0644" "lib actions"
+    create_generated_file "$PACKAGE_DIR" "lib/commands.sh"               _embed_lib_commands    "0644" "lib commands"
+    create_generated_file "$PACKAGE_DIR" "sui-control.sh"                _embed_entry_point     "0755" "control script"
+    create_generated_file "$PACKAGE_DIR" "templates/acme-cert.sh.tpl"         _embed_tpl_acme_cert "0644" "acme template"
+    create_generated_file "$PACKAGE_DIR" "templates/s-ui-db-configure.sh.tpl" _embed_tpl_db_config "0644" "db template"
+    create_generated_file "$PACKAGE_DIR" "templates/docker-compose.yml.tpl"   _embed_tpl_compose   "0644" "compose template"
+    create_generated_file "$PACKAGE_DIR" "templates/sui-control.conf.tpl"    _embed_tpl_config    "0644" "config template"
 
-    # Generate bin scripts
+    # Write VERSION
+    printf '%s\n' "$BUILT_VERSION" > "$PACKAGE_DIR/VERSION"
+
+    # Generate runtime files to CONFIG_DIR / RUNTIME_DIR
+    create_generated_file "$CONFIG_DIR" "$COMPOSE_FILE_NAME" _gen_compose ""     "compose file"
+    create_generated_file "$CONFIG_DIR" "$CONFIG_FILE_NAME"  _gen_config  "0600" "config file"
+
+    # Generate bin scripts to RUNTIME_BIN_DIR
     if [[ "$CERT_MODE" == "acme" ]]; then
-        create_generated_file "$bin_dir" "$ACME_CERT_SCRIPT_NAME" _gen_acme "0755" "acme cert script"
+        create_generated_file "$RUNTIME_BIN_DIR" "$ACME_CERT_SCRIPT_NAME" _gen_acme "0755" "acme cert script"
     fi
-    create_generated_file "$bin_dir" "$DB_CONFIG_SCRIPT_NAME" _gen_db "0755" "db config script"
+    create_generated_file "$RUNTIME_BIN_DIR" "$DB_CONFIG_SCRIPT_NAME" _gen_db "0755" "db config script"
 
-    ensure_config_loaded "$INSTALL_DIR"
+    ensure_config_loaded "$CONFIG_DIR/$CONFIG_FILE_NAME"
 
-    local db_script="$bin_dir/$DB_CONFIG_SCRIPT_NAME"
-    local db_path
-    db_path="$(resolve_path "$INSTALL_DIR" "$DATA_DIR")/s-ui.db"
+    local db_script="$RUNTIME_BIN_DIR/$DB_CONFIG_SCRIPT_NAME"
+    local db_path="$RUNTIME_DATA_DIR/s-ui.db"
     [[ -x "$db_script" ]] || die "Database configuration script not found: $db_script"
 
-    cd "$INSTALL_DIR" || die "Cannot cd to $INSTALL_DIR"
+    compose_in_dir "$CONFIG_DIR"
     docker compose up -d --remove-orphans s-ui
 
     local db_timeout=60 db_elapsed=0
@@ -211,8 +211,8 @@ EOF_BANNER
     "$db_script" "$INSTALL_GENERATED_USERNAME" "$INSTALL_GENERATED_PASSWORD"
     docker compose up -d --remove-orphans s-ui
 
-    initialize_runtime_artifacts "$INSTALL_DIR"
-    install_systemd_timer "$INSTALL_DIR"
+    initialize_runtime_artifacts
+    install_renewal_timer
 
     log_info "Installation completed"
     log_info "Generated username: $INSTALL_GENERATED_USERNAME"

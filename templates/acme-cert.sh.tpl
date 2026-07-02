@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2154
 set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PACKAGE_DIR="${PACKAGE_DIR}"
 # shellcheck disable=SC1091
-. "$SCRIPT_DIR/../lib/constants.sh"
+. "$PACKAGE_DIR/lib/constants.sh"
 # shellcheck disable=SC1091
-. "$SCRIPT_DIR/../lib/utils.sh"
+. "$PACKAGE_DIR/lib/utils.sh"
 require_command docker
-load_config_relative "$SCRIPT_DIR"
+ensure_config_loaded
 ensure_acme_mode
-compose_in_install_dir
+compose_in_dir "$CONFIG_DIR"
 check_port_80_free
 stop_sui_container_if_running
 MODE="${1:-renew}"

@@ -4,27 +4,33 @@
 # shellcheck disable=SC2034
 # Constants, defaults, version, globals
 
-SCRIPT_VERSION="1.3.0"
-
 # --- File and directory name constants ---
 SELF_SCRIPT_NAME="sui-control.sh"
 CONFIG_FILE_NAME="sui-control.conf"
 COMPOSE_FILE_NAME="docker-compose.yml"
 ACME_CERT_SCRIPT_NAME="acme-cert.sh"
 DB_CONFIG_SCRIPT_NAME="s-ui-db-configure.sh"
-SYSTEMD_DIR_NAME="systemd"
-SYSTEMD_SERVICE_NAME="s-ui-cert-renew.service"
-SYSTEMD_TIMER_NAME="s-ui-cert-renew.timer"
+
+# --- FHS paths (set by resolve_layout() in utils.sh) ---
+CONFIG_DIR=""
+RUNTIME_DIR=""
+RUNTIME_BIN_DIR=""
+RUNTIME_SYSTEMD_DIR=""
+RUNTIME_DATA_DIR=""
+RUNTIME_CERT_DIR=""
+RUNTIME_ACME_DIR=""
+
+# --- System integration ---
+SYSTEMD_DST_DIR="/etc/systemd/system"
+SYSTEMD_CONTROL_SERVICE_NAME="sui-control.service"
+SYSTEMD_RENEW_SERVICE_NAME="sui-control-renew.service"
+SYSTEMD_RENEW_TIMER_NAME="sui-control-renew.timer"
+CRON_DST_DIR="/etc/cron.d"
+CRON_FILE_NAME="sui-control-renew"
 
 # --- Default configuration values ---
-DEFAULT_INSTALL_DIR="/opt/s-ui"
 DEFAULT_DOMAIN=""
 DEFAULT_TZ=""
-DEFAULT_DATA_DIR="./db"
-DEFAULT_CERT_DIR="./cert"
-DEFAULT_ACME_DIR="./acme"
-DEFAULT_BIN_DIR="./bin"
-DEFAULT_SYSTEMD_DST_DIR="/etc/systemd/system"
 DEFAULT_TIMER_ON_CALENDAR="Mon *-*-* 03:00:00"
 DEFAULT_TIMER_RANDOM_DELAY="1h"
 DEFAULT_TIMER_ON_CALENDAR_IP="daily"
@@ -36,6 +42,8 @@ DEFAULT_SUI_SUBSCRIPTION_PORT="2096"
 DEFAULT_SUI_PANEL_PATH="panel"
 DEFAULT_SUI_SUBSCRIPTION_PATH="sub"
 SELF_SIGNED_DIR_NAME="selfsigned"
+DEFAULT_INIT_SYSTEM="auto"
+SUPPORTED_INIT_SYSTEMS=("systemd" "openrc" "runit" "s6" "dinit")
 
 # --- Terminal color codes (interpreted by printf %b) ---
 COLOR_INFO='\033[0;32m'
@@ -46,23 +54,17 @@ COLOR_RESET='\033[0m'
 # --- Runtime state ---
 SCRIPT_ARG0="$0"
 SCRIPT_PATH=""
+PACKAGE_DIR=""
 CURRENT_COMMAND=""
 COMMAND=""
 AUTO_CONFIRM="0"
 BATCH_INSTALL="0"
-RUNTIME_INSTALL_DIR=""
 INSTALL_GENERATED_USERNAME=""
 INSTALL_GENERATED_PASSWORD=""
 
 # --- Configuration (may be overridden by env vars, CLI args, or config file) ---
-INSTALL_DIR="${INSTALL_DIR:-$DEFAULT_INSTALL_DIR}"
 DOMAIN="${DOMAIN:-$DEFAULT_DOMAIN}"
 TZ="${TZ:-$DEFAULT_TZ}"
-DATA_DIR="$DEFAULT_DATA_DIR"
-CERT_DIR="$DEFAULT_CERT_DIR"
-ACME_DIR="$DEFAULT_ACME_DIR"
-BIN_DIR="$DEFAULT_BIN_DIR"
-SYSTEMD_DST_DIR="$DEFAULT_SYSTEMD_DST_DIR"
 TIMER_ON_CALENDAR="${TIMER_ON_CALENDAR:-$DEFAULT_TIMER_ON_CALENDAR}"
 TIMER_RANDOM_DELAY="${TIMER_RANDOM_DELAY:-$DEFAULT_TIMER_RANDOM_DELAY}"
 CERT_MODE="${CERT_MODE:-$DEFAULT_CERT_MODE}"
@@ -76,3 +78,4 @@ CLI_SUBSCRIPTION_PORT_SET=""
 CLI_PANEL_PATH_SET=""
 CLI_SUBSCRIPTION_PATH_SET=""
 CLI_IP_CERT_SET=""
+INIT_SYSTEM="${INIT_SYSTEM:-$DEFAULT_INIT_SYSTEM}"

@@ -11,8 +11,8 @@ services:
     environment:
       TZ: "${TZ}"
     volumes:
-      - "${DATA_DIR}:/app/db"
-      - "${CERT_DIR}:/certs"
+      - "${RUNTIME_DATA_DIR}:/app/db"
+      - "${RUNTIME_CERT_DIR}:/certs"
 
   acme-sh:
     image: neilpang/acme.sh:latest
@@ -21,8 +21,8 @@ services:
     networks:
       - s-ui
     volumes:
-      - "${ACME_DIR}:/acme.sh"
-      - "${CERT_DIR}:/certs"
+      - "${RUNTIME_ACME_DIR}:/acme.sh"
+      - "${RUNTIME_CERT_DIR}:/certs"
 
 networks:
   s-ui:

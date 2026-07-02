@@ -4,6 +4,25 @@
 # Shared utility functions (single source of truth for installed scripts)
 
 # ----------------------------------------------------------------------
+# Layout resolution
+# ----------------------------------------------------------------------
+# shellcheck disable=SC2034
+resolve_layout() {
+    if [[ "$PACKAGE_DIR" == /usr/lib/* ]] || [[ "$PACKAGE_DIR" == /usr/local/lib/* ]]; then
+        CONFIG_DIR="/etc/sui-control"
+        RUNTIME_DIR="/var/lib/sui-control"
+    else
+        CONFIG_DIR="$PACKAGE_DIR"
+        RUNTIME_DIR="$PACKAGE_DIR"
+    fi
+    RUNTIME_BIN_DIR="$RUNTIME_DIR/bin"
+    RUNTIME_SYSTEMD_DIR="$RUNTIME_DIR/systemd"
+    RUNTIME_DATA_DIR="$RUNTIME_DIR/db"
+    RUNTIME_CERT_DIR="$RUNTIME_DIR/cert"
+    RUNTIME_ACME_DIR="$RUNTIME_DIR/acme"
+}
+
+# ----------------------------------------------------------------------
 # Logging
 # ----------------------------------------------------------------------
 log_message() {
@@ -104,22 +123,17 @@ validate_simple_conf_value() {
 assign_config_value() {
     local key="$1" value="$2"
     case "$key" in
-        install_dir)       INSTALL_DIR="$value" ;;
-        domain)            DOMAIN="$value" ;;
-        tz)                TZ="$value" ;;
-        data_dir)          DATA_DIR="$value" ;;
-        cert_dir)          CERT_DIR="$value" ;;
-        acme_dir)          ACME_DIR="$value" ;;
-        bin_dir)           BIN_DIR="$value" ;;
-        systemd_dst_dir)   SYSTEMD_DST_DIR="$value" ;;
-        timer_on_calendar) TIMER_ON_CALENDAR="$value" ;;
-        timer_random_delay) TIMER_RANDOM_DELAY="$value" ;;
-        cert_mode)         CERT_MODE="$value" ;;
-        self_signed_days)  SELF_SIGNED_DAYS="$value" ;;
-        panel_port)        SUI_PANEL_PORT="$value" ;;
-        subscription_port) SUI_SUBSCRIPTION_PORT="$value" ;;
-        panel_path)        SUI_PANEL_PATH="$value" ;;
-        subscription_path) SUI_SUBSCRIPTION_PATH="$value" ;;
+        domain)              DOMAIN="$value" ;;
+        tz)                  TZ="$value" ;;
+        timer_on_calendar)   TIMER_ON_CALENDAR="$value" ;;
+        timer_random_delay)  TIMER_RANDOM_DELAY="$value" ;;
+        cert_mode)           CERT_MODE="$value" ;;
+        self_signed_days)    SELF_SIGNED_DAYS="$value" ;;
+        panel_port)          SUI_PANEL_PORT="$value" ;;
+        subscription_port)   SUI_SUBSCRIPTION_PORT="$value" ;;
+        panel_path)          SUI_PANEL_PATH="$value" ;;
+        subscription_path)   SUI_SUBSCRIPTION_PATH="$value" ;;
+        init_system)         INIT_SYSTEM="$value" ;;
         *) die "Unsupported config key in $CONFIG_FILE_NAME: $key" ;;
     esac
 }
@@ -145,13 +159,6 @@ parse_config_file() {
         validate_simple_conf_value "$key" "$value"
         assign_config_value "$key" "$value"
     done < "$config_file"
-}
-
-load_config_relative() {
-    local script_dir="$1"
-    local config_file="$script_dir/../$CONFIG_FILE_NAME"
-    [[ -f "$config_file" ]] || config_file="$script_dir/$CONFIG_FILE_NAME"
-    parse_config_file "$config_file"
 }
 
 # ----------------------------------------------------------------------
@@ -201,13 +208,14 @@ check_port_80_free() {
     check_tcp_port_free 80 || die "TCP port 80 is already in use"
 }
 
-compose_in_install_dir() {
-    cd "$INSTALL_DIR" || die "Cannot cd to $INSTALL_DIR"
-    [[ -f "$COMPOSE_FILE_NAME" ]] || die "Compose file not found: $INSTALL_DIR/$COMPOSE_FILE_NAME"
+compose_in_dir() {
+    local dir="$1"
+    cd "$dir" || die "Cannot cd to $dir"
+    [[ -f "$COMPOSE_FILE_NAME" ]] || die "Compose file not found: $dir/$COMPOSE_FILE_NAME"
 }
 
 restart_sui_container() {
-    cd "$INSTALL_DIR" || die "Cannot cd to $INSTALL_DIR"
+    compose_in_dir "$CONFIG_DIR"
     if docker compose ps --status running --services 2>/dev/null | grep -qx 's-ui'; then
         log_info "Restarting s-ui container"
         docker compose restart s-ui
@@ -222,7 +230,7 @@ restart_sui_container() {
 }
 
 stop_sui_container_if_running() {
-    cd "$INSTALL_DIR" || die "Cannot cd to $INSTALL_DIR"
+    compose_in_dir "$CONFIG_DIR"
     docker compose stop s-ui >/dev/null 2>&1 || true
 }
 

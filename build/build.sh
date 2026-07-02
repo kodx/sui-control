@@ -6,6 +6,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 OUTPUT="$PROJECT_DIR/sui-control-install.sh"
+VERSION="$(cat "$PROJECT_DIR/VERSION")"
 
 generate_embed_func() {
     local func_name="$1"
@@ -35,10 +36,12 @@ generate_gen_func() {
 
 {
     echo '#!/usr/bin/env bash'
-    echo '# shellcheck disable=SC2034'
+    echo '# shellcheck disable=SC2034,SC2154,SC2153'
     echo '# SPDX-License-Identifier: GPL-3.0-or-later'
-    echo "# Built by sui-control build.sh"
+    echo "# Built by sui-control build.sh — v${VERSION}"
     echo 'set -euo pipefail'
+    echo
+    echo "readonly BUILT_VERSION='${VERSION}'"
     echo
 
     echo '# === EMBEDDED PROJECT FILES ==='
@@ -60,11 +63,12 @@ generate_gen_func() {
     echo 'eval "$(_embed_lib_actions)"'
     echo
 
+    echo '# shellcheck disable=SC2154'
     echo '# === RUNTIME FILE GENERATORS ==='
     generate_gen_func _gen_compose "$PROJECT_DIR/templates/docker-compose.yml.tpl" 0
     generate_gen_func _gen_config  "$PROJECT_DIR/templates/sui-control.conf.tpl"  0
-    generate_gen_func _gen_acme    "$PROJECT_DIR/templates/acme-cert.sh.tpl"       1
-    generate_gen_func _gen_db      "$PROJECT_DIR/templates/s-ui-db-configure.sh.tpl" 1
+    generate_gen_func _gen_acme    "$PROJECT_DIR/templates/acme-cert.sh.tpl"       0
+    generate_gen_func _gen_db      "$PROJECT_DIR/templates/s-ui-db-configure.sh.tpl" 0
     echo
 
     echo '# === INSTALL LOGIC ==='

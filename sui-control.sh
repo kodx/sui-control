@@ -10,18 +10,19 @@ source "$SCRIPT_DIR/lib/constants.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/utils.sh"
 
+PACKAGE_DIR="$SCRIPT_DIR"
+resolve_layout
+
+# Dev config overrides (optional, for local testing)
 [[ -f "$SCRIPT_DIR/config.conf" ]] && parse_config_file "$SCRIPT_DIR/config.conf"
 
 init_config() {
-    local install_dir cert_mode domain panel_port sub_port ans
+    local cert_mode domain panel_port sub_port ans
 
-    if [[ -f "$SCRIPT_DIR/config.conf" ]]; then
-        read -r -p "config.conf already exists. Overwrite? [y/N] " ans
+    if [[ -f "$CONFIG_DIR/$CONFIG_FILE_NAME" ]]; then
+        read -r -p "$CONFIG_DIR/$CONFIG_FILE_NAME already exists. Overwrite? [y/N] " ans
         [[ "$ans" =~ ^[yY] ]] || { echo "Aborted."; exit 0; }
     fi
-
-    read -r -p "Install directory [/opt/s-ui]: " install_dir
-    install_dir="${install_dir:-/opt/s-ui}"
 
     while true; do
         read -r -p "Certificate mode (selfsigned/acme) [selfsigned]: " cert_mode
@@ -40,24 +41,24 @@ init_config() {
     read -r -p "Subscription port [2096]: " sub_port
     sub_port="${sub_port:-2096}"
 
-    cat > "$SCRIPT_DIR/config.conf" <<EOF
-# sui-control user overrides
-install_dir=$install_dir
+    mkdir -p "$CONFIG_DIR"
+    cat > "$CONFIG_DIR/$CONFIG_FILE_NAME" <<EOF
+# sui-control configuration
 cert_mode=$cert_mode
 panel_port=$panel_port
 subscription_port=$sub_port
 EOF
 
     if [[ -n "$domain" ]]; then
-        echo "domain=$domain" >> "$SCRIPT_DIR/config.conf"
+        echo "domain=$domain" >> "$CONFIG_DIR/$CONFIG_FILE_NAME"
     fi
 
-    echo "Created $SCRIPT_DIR/config.conf"
+    echo "Created $CONFIG_DIR/$CONFIG_FILE_NAME"
 }
 
 prompt_create_config() {
     local ans
-    echo "config.conf not found — create one with your preferred defaults?"
+    echo "$CONFIG_DIR/$CONFIG_FILE_NAME not found — create one with your preferred defaults?"
     echo "  (You can also run './sui-control.sh init-config' later)"
     read -r -p "Create config.conf now? [y/N] " ans
     if [[ "$ans" =~ ^[yY] ]]; then
@@ -75,7 +76,7 @@ case "${1:-}" in
     help|-h|--help)
         ;;
     *)
-        [[ -f "$SCRIPT_DIR/config.conf" ]] || prompt_create_config
+        [[ -f "$CONFIG_DIR/$CONFIG_FILE_NAME" ]] || prompt_create_config
         ;;
 esac
 
