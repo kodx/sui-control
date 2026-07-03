@@ -366,7 +366,7 @@ create_generated_file() {
     log_info "Creating $label at: $path"
     old_umask="$(umask)"
     umask 077
-    "$generator" > "$path"
+    "$generator" > "$path" || { umask "$old_umask"; die "Failed to create $label: $path"; }
     umask "$old_umask"
     [[ -n "$mode" ]] && chmod "$mode" "$path"
 }
@@ -379,19 +379,63 @@ assert_nonempty_value() {
     [[ -n "$value" ]] || die "$label must not be empty"
 }
 
+_compute_container_stamp() {
+    local ports
+    ports="$(get_inbound_ports | tr '\n' ',' | sed 's/,$//')"
+    printf '%s' "v1|${ports}|${SUI_PANEL_PORT}|${SUI_SUBSCRIPTION_PORT}|${SUI_IMAGE}|${TZ}"
+}
+
+_update_config_stamp() {
+    local new_stamp="$1"
+    local config_file="$CONFIG_DIR/$CONFIG_FILE_NAME"
+    [[ -f "$config_file" ]] || return
+    if grep -q '^container_stamp=' "$config_file" 2>/dev/null; then
+        sed -i "s#^container_stamp=.*#container_stamp=$new_stamp#" "$config_file"
+    else
+        echo "container_stamp=$new_stamp" >> "$config_file"
+    fi
+}
+
 start_containers() {
-    compose_in_dir "$CONFIG_DIR"
-    docker compose up -d --remove-orphans
+    local port db_path new_stamp
+    local ports_args=()
+
+    db_path="$RUNTIME_DATA_DIR/s-ui.db"
+    if [[ -f "$db_path" ]]; then
+        while IFS= read -r port; do
+            [[ -z "$port" ]] && continue
+            ports_args+=(-p "$port:$port")
+        done < <(get_inbound_ports)
+    fi
+
+    ports_args+=(-p "$SUI_PANEL_PORT:$SUI_PANEL_PORT")
+    ports_args+=(-p "$SUI_SUBSCRIPTION_PORT:$SUI_SUBSCRIPTION_PORT")
+
+    new_stamp="$(_compute_container_stamp)"
+
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$CONTAINER_NAME" && \
+       [[ "$CONTAINER_STAMP" == "$new_stamp" ]]; then
+        return 0
+    fi
+
+    docker network inspect "$DOCKER_NETWORK" >/dev/null 2>&1 || docker network create "$DOCKER_NETWORK" >/dev/null
+    docker stop "$CONTAINER_NAME" 2>/dev/null || true
+    docker rm "$CONTAINER_NAME" 2>/dev/null || true
+
+    docker run -d --restart=unless-stopped --network "$DOCKER_NETWORK" --name "$CONTAINER_NAME" "${ports_args[@]}" -e "TZ=${TZ}" -v "$RUNTIME_DATA_DIR:/app/db" -v "$RUNTIME_CERT_DIR:/certs" "$SUI_IMAGE" >/dev/null
+
+    _update_config_stamp "$new_stamp"
+    CONTAINER_STAMP="$new_stamp"
 }
 
 stop_containers() {
-    compose_in_dir "$CONFIG_DIR"
-    docker compose stop
+    docker stop "$CONTAINER_NAME" 2>/dev/null || true
 }
 
 restart_containers() {
-    compose_in_dir "$CONFIG_DIR"
-    docker compose restart
+    stop_containers
+    docker rm "$CONTAINER_NAME" 2>/dev/null || true
+    start_containers
 }
 
 # ----------------------------------------------------------------------
@@ -702,10 +746,10 @@ remove_renewal_timer() {
 # ----------------------------------------------------------------------
 # Runtime artifact initialization and certificate renewal
 # ----------------------------------------------------------------------
-initialize_runtime_artifacts() {
+issue_certificate() {
     local resolved_bin_dir
     ensure_config_loaded
-    compose_in_dir "$CONFIG_DIR"
+
     resolved_bin_dir="$RUNTIME_BIN_DIR"
     if [[ "$CERT_MODE" == "selfsigned" ]]; then
         generate_self_signed_cert
@@ -751,7 +795,8 @@ substitute_template() {
     vars="$vars SUI_PANEL_PATH SUI_SUBSCRIPTION_PATH"
     vars="$vars PACKAGE_DIR RUNTIME_CERT_DIR RUNTIME_BIN_DIR RUNTIME_DATA_DIR RUNTIME_ACME_DIR"
     vars="$vars CONFIG_DIR SELF_SIGNED_DIR_NAME SUI_CONTROL_USER"
-    vars="$vars ACME_CERT_SCRIPT_NAME DB_CONFIG_SCRIPT_NAME COMPOSE_FILE_NAME"
+    vars="$vars ACME_CERT_SCRIPT_NAME DB_CONFIG_SCRIPT_NAME"
+    vars="$vars INBOUND_PORTS INIT_SYSTEM SUI_IMAGE CURL_TEST_IMAGE CONTAINER_STAMP"
     vars="$vars SYSTEMD_CONTROL_SERVICE_NAME SYSTEMD_RENEW_SERVICE_NAME SYSTEMD_RENEW_TIMER_NAME"
     vars="$vars SYSTEMD_DST_DIR CRON_DST_DIR CRON_FILE_NAME"
     vars="$vars INSTALL_GENERATED_USERNAME INSTALL_GENERATED_PASSWORD"
@@ -767,6 +812,7 @@ substitute_template() {
 # Bootstrap setup (FHS mode — first-time or re-configuration)
 # ----------------------------------------------------------------------
 bootstrap_installation() {
+    setup_sui_user
     _randomize_if_default SUI_PANEL_PORT        "$DEFAULT_SUI_PANEL_PORT"        CLI_PANEL_PORT_SET        ""               generate_random_port 20000 40000
     _randomize_if_default SUI_SUBSCRIPTION_PORT "$DEFAULT_SUI_SUBSCRIPTION_PORT" CLI_SUBSCRIPTION_PORT_SET "$SUI_PANEL_PORT" generate_random_port 20000 40000
     _randomize_if_default SUI_PANEL_PATH        "$DEFAULT_SUI_PANEL_PATH"        CLI_PANEL_PATH_SET        ""               generate_random_path_segment
@@ -784,7 +830,7 @@ bootstrap_installation() {
     check_tcp_port_free "$SUI_SUBSCRIPTION_PORT" || die "Subscription TCP port is already in use: $SUI_SUBSCRIPTION_PORT"
 
     if [[ "$CERT_MODE" == "acme" ]]; then
-        local test_image="curlimages/curl:latest"
+        local test_image="$CURL_TEST_IMAGE"
         local urls=("https://acme-v02.api.letsencrypt.org/directory" "https://www.google.com/generate_204")
         local url connected="0"
         for url in "${urls[@]}"; do
@@ -798,7 +844,6 @@ bootstrap_installation() {
 
     mkdir -p "$RUNTIME_BIN_DIR" "$RUNTIME_DATA_DIR" "$RUNTIME_CERT_DIR" "$RUNTIME_ACME_DIR" "$RUNTIME_SYSTEMD_DIR"
 
-    substitute_template "$PACKAGE_DIR/templates/docker-compose.yml.tpl" "$CONFIG_DIR/$COMPOSE_FILE_NAME"
     substitute_template "$PACKAGE_DIR/templates/sui-control.conf.tpl"  "$CONFIG_DIR/$CONFIG_FILE_NAME"
     chmod 0600 "$CONFIG_DIR/$CONFIG_FILE_NAME"
 
@@ -815,28 +860,29 @@ bootstrap_installation() {
     local db_path="$RUNTIME_DATA_DIR/s-ui.db"
     [[ -x "$db_script" ]] || die "Database configuration script not found: $db_script"
 
-    compose_in_dir "$CONFIG_DIR"
-    docker compose up -d --remove-orphans s-ui
+    start_containers
 
-    local db_timeout=60 db_elapsed=0
+    # shellcheck disable=SC2153
+    local db_timeout="$DB_TIMEOUT" db_elapsed=0
     log_info "Waiting for s-ui to initialize database (up to ${db_timeout}s)..."
     while (( db_elapsed < db_timeout )); do
         [[ -f "$db_path" && -s "$db_path" ]] && break
-        sleep 2
+        sleep "$DB_POLL_INTERVAL"
         db_elapsed=$(( db_elapsed + 2 ))
     done
     if [[ ! -f "$db_path" || ! -s "$db_path" ]]; then
-        docker compose logs --no-color s-ui | tail -n 50 >&2 || true
+        docker logs "$CONTAINER_NAME" 2>/dev/null | tail -n 50 >&2 || true
         die "Database file was not created in time: $db_path"
     fi
 
-    docker compose stop s-ui
+    stop_containers
     [[ -f "$db_path" ]] || die "Database file not found after first start: $db_path"
     "$db_script" "$INSTALL_GENERATED_USERNAME" "$INSTALL_GENERATED_PASSWORD"
-    docker compose up -d --remove-orphans s-ui
+    start_containers
 
-    initialize_runtime_artifacts
+    issue_certificate
     install_renewal_timer
+    ensure_file_ownership "$CONFIG_DIR" "$RUNTIME_DIR"
 
     log_info "Setup completed"
     log_info "Generated username: $INSTALL_GENERATED_USERNAME"

@@ -4,3 +4,4 @@
 .DS_Store
 Thumbs.db
 /config.conf
+/test_db

@@ -12,7 +12,7 @@ show_usage() {
     [[ -f "$PACKAGE_DIR/VERSION" ]] && ver="$(cat "$PACKAGE_DIR/VERSION")"
     printf 'SUI-Control version %s\n\n' "$ver"
     cat <<'EOF_USAGE'
-SUI-Control installs, configures and maintains an s-ui deployment with Docker Compose.
+SUI-Control installs, configures and maintains an s-ui deployment with Docker.
 
 Usage:
   sui-control.sh <command> [options]
@@ -24,7 +24,7 @@ Commands:
   renew                         Renew certificates immediately.
   status                        Show current installation status.
   setup                         Configure deployment interactively (FHS mode).
-  init                          Re-initialize runtime artifacts (regenerate certs, restart).
+  issue-cert                     Issue certificate (force, regardless of schedule)
   service-install               Install and enable timer/service for certificate renewal.
   service-remove                Remove renewal timer/service.
   update                        Pull newer container images and restart services.
@@ -39,8 +39,8 @@ Options:
   --timer-on-calendar SPEC      systemd OnCalendar value for renew timer.
   --timer-random-delay SPEC     systemd RandomizedDelaySec value for renew timer.
   --cert-mode MODE              Certificate mode: selfsigned or acme.
-  --panel-port PORT             Panel port exposed by docker-compose.
-  --subscription-port PORT      Subscription port exposed by docker-compose.
+  --panel-port PORT             Panel port.
+  --subscription-port PORT      Subscription port.
   --panel-path PATH             URL path prefix for panel, without leading slash.
   --subscription-path PATH      URL path prefix for subscriptions, without leading slash.
   --yes                         Skip confirmation prompts where possible.
@@ -71,7 +71,6 @@ show_status() {
     echo
     echo 'Files and directories:'
     print_path_status 'Config file'           "$CONFIG_DIR/$CONFIG_FILE_NAME"
-    print_path_status 'Compose file'          "$CONFIG_DIR/$COMPOSE_FILE_NAME"
     print_path_status 'Control script'        "$PACKAGE_DIR/$SELF_SCRIPT_NAME"
     print_path_status 'Lib constants'         "$PACKAGE_DIR/lib/constants.sh"
     print_path_status 'Lib utils'             "$PACKAGE_DIR/lib/utils.sh"
@@ -109,18 +108,10 @@ show_status() {
         echo 'Docker daemon: unavailable'
     else
         echo 'Docker daemon: reachable'
-        if docker compose version >/dev/null 2>&1; then
-            echo 'Docker compose: available'
-            if [[ -f "$CONFIG_DIR/$COMPOSE_FILE_NAME" ]]; then
-                echo
-                echo 'Docker compose config:'
-                (cd "$CONFIG_DIR" && docker compose config --services) || true
-                echo
-                echo 'Docker compose status:'
-                (cd "$CONFIG_DIR" && docker compose ps -a) || true
-            fi
+        if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx 's-ui'; then
+            echo 's-ui container: running'
         else
-            echo 'Docker compose: unavailable'
+            echo 's-ui container: not running'
         fi
     fi
     echo
@@ -166,9 +157,11 @@ show_status() {
 # ----------------------------------------------------------------------
 update_containers() {
     ensure_config_loaded
-    compose_in_dir "$CONFIG_DIR"
-    docker compose pull
-    docker compose up -d --remove-orphans
+    log_info "Pulling latest s-ui image"
+    docker pull "$SUI_IMAGE"
+    stop_containers
+    docker rm s-ui 2>/dev/null || true
+    start_containers
 }
 
 cleanup_docker_artifacts() {
@@ -185,16 +178,12 @@ cleanup_docker_artifacts() {
 # Uninstall
 # ----------------------------------------------------------------------
 uninstall_control_script() {
-    [[ -d "$CONFIG_DIR" ]]   || die "Config directory not found: $CONFIG_DIR"
-    [[ -f "$CONFIG_DIR/$CONFIG_FILE_NAME" ]] || die "Config file not found: $CONFIG_DIR/$CONFIG_FILE_NAME"
-    [[ -f "$CONFIG_DIR/$COMPOSE_FILE_NAME" ]] || die "Compose file not found: $CONFIG_DIR/$COMPOSE_FILE_NAME"
-    load_install_config "$CONFIG_DIR/$CONFIG_FILE_NAME"
     if [[ "$AUTO_CONFIRM" != "1" ]]; then
         prompt_yes_no "Remove s-ui installation?" 'n' \
             || { log_info "Uninstall cancelled"; return; }
     fi
     if docker info >/dev/null 2>&1; then
-        (cd "$CONFIG_DIR" && docker compose down -v --remove-orphans) || true
+        docker rm -f s-ui 2>/dev/null || true
     else
         log_warn "Docker daemon not reachable — skip container cleanup"
     fi
@@ -287,15 +276,6 @@ dispatch_command() {
         esac
     done
 
-    if [[ "$domain_option_set" == "1" && "$CERT_MODE" != "acme" ]]; then
-        die "Option --domain is allowed only together with --cert-mode acme"
-    fi
-    if [[ "$CLI_IP_CERT_SET" == "1" && "$CERT_MODE" != "acme" ]]; then
-        die "Option --ip is allowed only together with --cert-mode acme"
-    fi
-    if [[ "$domain_option_set" == "1" && "$CLI_IP_CERT_SET" == "1" ]]; then
-        die "Options --domain and --ip are mutually exclusive"
-    fi
 
     case "$COMMAND" in
         setup)
@@ -327,19 +307,16 @@ dispatch_command() {
             ensure_config_loaded
             renew_certificate
             ;;
-        renew-now)
-            log_warn "renew-now is deprecated; use 'renew' instead"
-            CURRENT_COMMAND="renew"
+        issue-cert)
+            CURRENT_COMMAND="issue-cert"
+            local _cli_cert_mode="$CERT_MODE" _cli_domain="$DOMAIN"
             check_core_requirements
             ensure_config_loaded
-            renew_certificate
-            ;;
-        init)
-            CURRENT_COMMAND="init"
-            check_core_requirements
+            [[ "$_cli_cert_mode" != "$DEFAULT_CERT_MODE" ]] && CERT_MODE="$_cli_cert_mode"
+            [[ -n "$_cli_domain" && "$_cli_domain" != "$DEFAULT_DOMAIN" ]] && DOMAIN="$_cli_domain"
             [[ "$CERT_MODE" != "selfsigned" ]] || require_command openssl
-            ensure_config_loaded
-            initialize_runtime_artifacts
+            prepare_effective_settings
+            issue_certificate
             ;;
         status)
             CURRENT_COMMAND="status"

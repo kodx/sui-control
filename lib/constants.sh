@@ -7,7 +7,6 @@
 # --- File and directory name constants ---
 SELF_SCRIPT_NAME="sui-control.sh"
 CONFIG_FILE_NAME="sui-control.conf"
-COMPOSE_FILE_NAME="docker-compose.yml"
 ACME_CERT_SCRIPT_NAME="acme-cert.sh"
 DB_CONFIG_SCRIPT_NAME="s-ui-db-configure.sh"
 
@@ -47,7 +46,19 @@ DEFAULT_SUI_PANEL_PATH="panel"
 DEFAULT_SUI_SUBSCRIPTION_PATH="sub"
 SELF_SIGNED_DIR_NAME="selfsigned"
 DEFAULT_INIT_SYSTEM="auto"
-SUPPORTED_INIT_SYSTEMS=("systemd" "openrc" "runit" "s6" "dinit")
+
+# --- Docker images ---
+DEFAULT_SUI_IMAGE="alireza7/s-ui:latest"
+SUI_IMAGE="${SUI_IMAGE:-$DEFAULT_SUI_IMAGE}"
+DEFAULT_CURL_TEST_IMAGE="curlimages/curl:latest"
+DEFAULT_CONTAINER_STAMP=""
+CURL_TEST_IMAGE="${CURL_TEST_IMAGE:-$DEFAULT_CURL_TEST_IMAGE}"
+
+# --- Docker runtime ---
+CONTAINER_NAME="s-ui"
+DOCKER_NETWORK="s-ui"
+DB_TIMEOUT="60"
+DB_POLL_INTERVAL="2"
 
 # --- Terminal color codes (interpreted by printf %b) ---
 COLOR_INFO='\033[0;32m'
@@ -83,3 +94,5 @@ CLI_PANEL_PATH_SET=""
 CLI_SUBSCRIPTION_PATH_SET=""
 CLI_IP_CERT_SET=""
 INIT_SYSTEM="${INIT_SYSTEM:-$DEFAULT_INIT_SYSTEM}"
+CONTAINER_STAMP="${CONTAINER_STAMP:-$DEFAULT_CONTAINER_STAMP}"
+INBOUND_PORTS=""

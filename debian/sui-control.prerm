@@ -21,7 +21,8 @@ case "$1" in
 
         [ -L /etc/service/sui-control ] && rm -f /etc/service/sui-control
         [ -d /etc/sv/sui-control ] && rm -rf /etc/sv/sui-control
-        [ -d /etc/s6/sui-control ] && rm -rf /etc/s6/sui-control
+        [ -d /etc/s6/sui-control ] && { rm -f /etc/s6/sui-control/service; rm -rf /etc/s6/sui-control; }
+        [ -L /etc/s6/service ] && rm -f /etc/s6/service
 
         [ -f /etc/dinit.d/sui-control ] && {
             command -v dinitctl >/dev/null && \

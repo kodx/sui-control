@@ -9,7 +9,7 @@
 - **Two entry points**: `sui-control.sh` (development/manager) and `sui-control-install.sh` (self-contained installer)
 - **FHS layout**:
   - Package (`lib/`, `templates/`, `sui-control.sh`, `VERSION`): auto-detected from `$(dirname "$(realpath "$0")")`, or `/opt/s-ui` when installed
-  - Config: `/etc/sui-control/sui-control.conf`, `docker-compose.yml`
+  - Config: `/etc/sui-control/sui-control.conf`
   - Runtime data: `/var/lib/sui-control/` (`bin/`, `db/`, `cert/`, `acme/`, `systemd/`)
 - **Init system abstraction**: `install_renewal_timer`/`remove_renewal_timer` dispatch to 5 backends (systemd, OpenRC, runit, s6, dinit). Non-systemd backends create cron job for renewal.
 - **Service commands** (`start`, `stop`, `restart`) allow `sui-control.sh` to be used as a system service script by any init system.

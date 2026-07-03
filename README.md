@@ -1,6 +1,6 @@
 # SUI-Control
 
-Install, configure and maintain an [s-ui](https://github.com/alireza0/s-ui) deployment with Docker Compose.
+Install, configure and maintain an [s-ui](https://github.com/alireza0/s-ui) deployment with Docker.
 
 ## Quick start
 
@@ -35,8 +35,8 @@ Options:
 | `--timer-on-calendar SPEC` | systemd OnCalendar for renew timer |
 | `--timer-random-delay SPEC` | systemd RandomizedDelaySec for renew timer |
 | `--cert-mode MODE` | `selfsigned` (default) or `acme` |
-| `--panel-port PORT` | Panel port exposed by docker-compose |
-| `--subscription-port PORT` | Subscription port exposed by docker-compose |
+| `--panel-port PORT` | Panel port |
+| `--subscription-port PORT` | Subscription port |
 | `--panel-path PATH` | URL path prefix for panel |
 | `--subscription-path PATH` | URL path prefix for subscriptions |
 | `--batch` | Non-interactive install using provided/default values |
@@ -54,15 +54,16 @@ sui-control.sh <command> [options]
 
 | Command | Description |
 |---------|-------------|
-| `start` | Start containers |
-| `stop` | Stop containers |
-| `restart` | Restart containers |
+| `start` | Start s-ui container |
+| `stop` | Stop s-ui container |
+| `restart` | Restart s-ui container (stops, removes, re-creates) |
 | `renew` | Renew certificates immediately |
 | `status` | Show installation status |
-| `init` | Re-initialize runtime artifacts |
+| `setup` | Configure deployment interactively (FHS mode) |
+| `issue-cert` | Issue certificate (force) |
 | `service-install` | Install and enable renewal timer |
 | `service-remove` | Remove renewal timer |
-| `update` | Pull newer images and restart |
+| `update` | Pull newer image and restart |
 | `cleanup` | Remove unused containers and dangling images |
 | `cleanup-all` | Remove unused containers and all unused images |
 | `uninstall` | Stop containers and remove installed files |
@@ -70,6 +71,9 @@ sui-control.sh <command> [options]
 Options: `--domain`, `--ip`, `--tz`, `--timer-on-calendar`, `--timer-random-delay`,
 `--cert-mode`, `--panel-port`, `--subscription-port`, `--panel-path`,
 `--subscription-path`, `--yes`, `-h`, `--help`.
+
+Inbound ports created via the s-ui panel are picked up automatically at every
+`start`/`restart` — no manual sync needed. `sqlite3` is required at runtime.
 
 ## Architecture
 
@@ -90,7 +94,7 @@ SUI-Control supports two deployment layouts, auto-detected by `resolve_layout()`
 | Path | Contents |
 |------|----------|
 | `/usr/lib/sui-control/` | `sui-control.sh`, `lib/`, `templates/` |
-| `/etc/sui-control/` | `sui-control.conf`, `docker-compose.yml` |
+| `/etc/sui-control/` | `sui-control.conf` |
 | `/var/lib/sui-control/` | `bin/`, `db/`, `cert/`, `acme/`, `systemd/` |
 
 Detection is automatic based on `PACKAGE_DIR` being under `/usr/lib/` or
@@ -133,7 +137,6 @@ sui-control/
 │   ├── commands.sh              CLI commands + main()
 │   └── install.sh               Install-only logic (not deployed)
 ├── templates/
-│   ├── docker-compose.yml.tpl
 │   ├── sui-control.conf.tpl
 │   ├── acme-cert.sh.tpl
 │   └── s-ui-db-configure.sh.tpl
@@ -152,7 +155,7 @@ Create `config.conf` in the project root to override defaults without touching
 `lib/constants.sh`. This file is not tracked by git (listed in `.gitignore`).
 
 ```bash
-./sui-control.sh init-config
+echo "SUI_PANEL_PORT=3000" >> config.conf
 ```
 
 ### Commit hooks
@@ -164,7 +167,8 @@ git config core.hooksPath .githooks
 ### Conventions
 
 - `lib/*.sh` have no shebang (sourced), SPDX header, `.editorconfig` hint
-- Templates use `${VARIABLE}` placeholders; generators are unquoted heredocs
+- Templates use `${VARIABLE}` placeholders; generators may use quoted or unquoted
+  heredocs depending on whether shell expansion is desired at build time
 - `lib/install.sh` is NOT deployed to target — embed-only in the installer
 - All timer backends dispatch from a single `install_renewal_timer()` / `remove_renewal_timer()`
 - Adding a new init system: add `_install_timer_$name` / `_remove_timer_$name` in `actions.sh`

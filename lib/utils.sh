@@ -26,8 +26,7 @@ resolve_layout() {
 # Core requirement checks
 # ----------------------------------------------------------------------
 check_core_requirements() {
-    require_command docker stat
-    docker compose version >/dev/null 2>&1 || die "docker compose plugin is required"
+    require_command docker sqlite3
 }
 
 # ----------------------------------------------------------------------
@@ -46,9 +45,6 @@ maybe_escalate_privileges() {
     fi
 }
 
-require_root() {
-    [[ "$(id -u)" -eq 0 ]] || die "This command must be run as root"
-}
 
 # ----------------------------------------------------------------------
 # Logging
@@ -175,9 +171,27 @@ assign_config_value() {
         subscription_port)   SUI_SUBSCRIPTION_PORT="$value" ;;
         panel_path)          SUI_PANEL_PATH="$value" ;;
         subscription_path)   SUI_SUBSCRIPTION_PATH="$value" ;;
-        init_system)         INIT_SYSTEM="$value" ;;
+        init_system)
+            case "$value" in
+                auto|systemd|openrc|runit|s6|dinit) INIT_SYSTEM="$value" ;;
+                *) die "Unsupported init_system in config: $value (expected: auto, systemd, openrc, runit, s6, dinit)" ;;
+            esac
+            ;;
+        inbound_ports)      INBOUND_PORTS="$value" ;;
+        sui_image)           SUI_IMAGE="$value" ;;
+        curl_test_image)     CURL_TEST_IMAGE="$value" ;;
+        container_stamp)     CONTAINER_STAMP="$value" ;;
         *) die "Unsupported config key in $CONFIG_FILE_NAME: $key" ;;
     esac
+}
+
+# ----------------------------------------------------------------------
+# File ownership helper
+# ----------------------------------------------------------------------
+ensure_file_ownership() {
+    [[ "$(id -u)" -eq 0 ]] || return 0
+    log_info "Setting ownership of runtime files to $SUI_CONTROL_USER:$SUI_CONTROL_USER"
+    chown -R "$SUI_CONTROL_USER:$SUI_CONTROL_USER" "$@" 2>/dev/null || true
 }
 
 parse_config_file() {
@@ -254,30 +268,24 @@ check_port_80_free() {
     check_tcp_port_free 80 || die "TCP port 80 is already in use"
 }
 
-compose_in_dir() {
-    local dir="$1"
-    cd "$dir" || die "Cannot cd to $dir"
-    [[ -f "$COMPOSE_FILE_NAME" ]] || die "Compose file not found: $dir/$COMPOSE_FILE_NAME"
-}
 
 restart_sui_container() {
-    compose_in_dir "$CONFIG_DIR"
-    if docker compose ps --status running --services 2>/dev/null | grep -qx 's-ui'; then
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx 's-ui'; then
         log_info "Restarting s-ui container"
-        docker compose restart s-ui
+        docker stop s-ui >/dev/null 2>&1 || true
+        docker rm s-ui >/dev/null 2>&1 || true
     else
         log_info "Starting s-ui container"
-        docker compose up -d --remove-orphans s-ui
     fi
-    if ! docker compose ps --status running --services 2>/dev/null | grep -qx 's-ui'; then
-        docker compose logs --no-color s-ui | tail -n 50 >&2 || true
+    start_containers
+    if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -qx 's-ui'; then
+        docker logs s-ui 2>/dev/null | tail -n 50 >&2 || true
         die "s-ui container is not running after restart"
     fi
 }
 
 stop_sui_container_if_running() {
-    compose_in_dir "$CONFIG_DIR"
-    docker compose stop s-ui >/dev/null 2>&1 || true
+    docker stop s-ui >/dev/null 2>&1 || true
 }
 
 ensure_acme_mode() {

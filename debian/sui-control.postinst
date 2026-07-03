@@ -21,5 +21,19 @@ case "$1" in
         if ! groups sui-control >/dev/null 2>&1 | grep -qw docker; then
             adduser sui-control docker >/dev/null 2>&1 || true
         fi
+
+        cat <<MSG
+
+  SUI-Control installed.
+
+  To run commands without sudo, add yourself to the 'sui-control' group:
+    sudo usermod -aG sui-control \$USER
+  Then log out and back in.
+
+  Run 'sui-control.sh setup' to configure your deployment.
+  This will install the service for auto-start at boot.
+  (Use 'sudo sui-control.sh setup' if you skip the group step.)
+
+MSG
         ;;
 esac

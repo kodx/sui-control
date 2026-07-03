@@ -15,10 +15,9 @@ Depends: ${misc:Depends},
  sqlite3,
  adduser,
  gettext-base,
- docker.io | docker,
- docker-compose-plugin | docker-compose
-Description: manage s-ui deployments with Docker Compose
+ docker.io | docker
+Description: manage s-ui deployments with Docker
  SUI-Control installs, configures and maintains an s-ui deployment
- with Docker Compose. Supports ACME (Let's Encrypt) and self-signed
+ with Docker. Supports ACME (Let's Encrypt) and self-signed
  certificates, multiple init systems (systemd, OpenRC, runit, s6,
  dinit), and runs under a dedicated non-root system user.

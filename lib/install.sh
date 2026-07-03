@@ -11,7 +11,7 @@ show_install_help() {
     cat <<'EOF'
 Usage: sui-control-install.sh [options]
 
-Installs s-ui with Docker Compose. Running without options starts an
+Installs s-ui with Docker. Running without options starts an
 interactive installation dialog.
 
 Options:
@@ -21,8 +21,8 @@ Options:
   --timer-on-calendar SPEC      systemd OnCalendar value for renew timer.
   --timer-random-delay SPEC     systemd RandomizedDelaySec value for renew timer.
   --cert-mode MODE              Certificate mode: selfsigned or acme.
-  --panel-port PORT             Panel port exposed by docker-compose.
-  --subscription-port PORT      Subscription port exposed by docker-compose.
+  --panel-port PORT             Panel port.
+  --subscription-port PORT      Subscription port.
   --panel-path PATH             URL path prefix for panel, without leading slash.
   --subscription-path PATH      URL path prefix for subscriptions, without leading slash.
   --batch                       Non-interactive install using provided/default values.
@@ -150,7 +150,7 @@ EOF_BANNER
     check_tcp_port_free "$SUI_SUBSCRIPTION_PORT" || die "Subscription TCP port is already in use: $SUI_SUBSCRIPTION_PORT"
 
     if [[ "$CERT_MODE" == "acme" ]]; then
-        local test_image="curlimages/curl:latest"
+        local test_image="$CURL_TEST_IMAGE"
         local urls=("https://acme-v02.api.letsencrypt.org/directory" "https://www.google.com/generate_204")
         local url connected="0"
         for url in "${urls[@]}"; do
@@ -185,14 +185,12 @@ EOF_BANNER
     create_generated_file "$PACKAGE_DIR" "sui-control.sh"                _embed_entry_point     "0755" "control script"
     create_generated_file "$PACKAGE_DIR" "templates/acme-cert.sh.tpl"         _embed_tpl_acme_cert "0644" "acme template"
     create_generated_file "$PACKAGE_DIR" "templates/s-ui-db-configure.sh.tpl" _embed_tpl_db_config "0644" "db template"
-    create_generated_file "$PACKAGE_DIR" "templates/docker-compose.yml.tpl"   _embed_tpl_compose   "0644" "compose template"
     create_generated_file "$PACKAGE_DIR" "templates/sui-control.conf.tpl"    _embed_tpl_config    "0644" "config template"
 
     # Write VERSION
     printf '%s\n' "$BUILT_VERSION" > "$PACKAGE_DIR/VERSION"
 
     # Generate runtime files to CONFIG_DIR / RUNTIME_DIR
-    create_generated_file "$CONFIG_DIR" "$COMPOSE_FILE_NAME" _gen_compose ""     "compose file"
     create_generated_file "$CONFIG_DIR" "$CONFIG_FILE_NAME"  _gen_config  "0600" "config file"
 
     # Generate bin scripts to RUNTIME_BIN_DIR
@@ -209,28 +207,29 @@ EOF_BANNER
     local db_path="$RUNTIME_DATA_DIR/s-ui.db"
     [[ -x "$db_script" ]] || die "Database configuration script not found: $db_script"
 
-    compose_in_dir "$CONFIG_DIR"
-    docker compose up -d --remove-orphans s-ui
+    start_containers
 
-    local db_timeout=60 db_elapsed=0
+    # shellcheck disable=SC2153
+    local db_timeout="$DB_TIMEOUT" db_elapsed=0
     log_info "Waiting for s-ui to initialize database (up to ${db_timeout}s)..."
     while (( db_elapsed < db_timeout )); do
         [[ -f "$db_path" && -s "$db_path" ]] && break
-        sleep 2
+        sleep "$DB_POLL_INTERVAL"
         db_elapsed=$(( db_elapsed + 2 ))
     done
     if [[ ! -f "$db_path" || ! -s "$db_path" ]]; then
-        docker compose logs --no-color s-ui | tail -n 50 >&2 || true
+        docker logs "$CONTAINER_NAME" 2>/dev/null | tail -n 50 >&2 || true
         die "Database file was not created in time: $db_path"
     fi
 
-    docker compose stop s-ui
+    stop_containers
     [[ -f "$db_path" ]] || die "Database file not found after first start: $db_path"
     "$db_script" "$INSTALL_GENERATED_USERNAME" "$INSTALL_GENERATED_PASSWORD"
-    docker compose up -d --remove-orphans s-ui
+    start_containers
 
-    initialize_runtime_artifacts
+    issue_certificate
     install_renewal_timer
+    ensure_file_ownership "$CONFIG_DIR" "$RUNTIME_DIR"
 
     log_info "Installation completed"
     log_info "Generated username: $INSTALL_GENERATED_USERNAME"

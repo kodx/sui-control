@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # .editorconfig hint: indent_style = space, indent_size = 4
-# shellcheck disable=SC2016
 # SPDX-License-Identifier: GPL-3.0-or-later
+# shellcheck disable=SC2016
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -58,7 +58,6 @@ generate_gen_func() {
     echo '# --- Template files ---'
     generate_embed_func _embed_tpl_acme_cert   "$PROJECT_DIR/templates/acme-cert.sh.tpl"
     generate_embed_func _embed_tpl_db_config   "$PROJECT_DIR/templates/s-ui-db-configure.sh.tpl"
-    generate_embed_func _embed_tpl_compose     "$PROJECT_DIR/templates/docker-compose.yml.tpl"
     generate_embed_func _embed_tpl_config      "$PROJECT_DIR/templates/sui-control.conf.tpl"
     echo
 
@@ -70,7 +69,6 @@ generate_gen_func() {
 
     echo '# shellcheck disable=SC2154'
     echo '# === RUNTIME FILE GENERATORS ==='
-    generate_gen_func _gen_compose "$PROJECT_DIR/templates/docker-compose.yml.tpl" 0
     generate_gen_func _gen_config  "$PROJECT_DIR/templates/sui-control.conf.tpl"  0
     generate_gen_func _gen_acme    "$PROJECT_DIR/templates/acme-cert.sh.tpl"       0
     generate_gen_func _gen_db      "$PROJECT_DIR/templates/s-ui-db-configure.sh.tpl" 0

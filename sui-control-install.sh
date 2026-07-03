@@ -18,7 +18,6 @@ _embed_lib_constants() {
 # --- File and directory name constants ---
 SELF_SCRIPT_NAME="sui-control.sh"
 CONFIG_FILE_NAME="sui-control.conf"
-COMPOSE_FILE_NAME="docker-compose.yml"
 ACME_CERT_SCRIPT_NAME="acme-cert.sh"
 DB_CONFIG_SCRIPT_NAME="s-ui-db-configure.sh"
 
@@ -58,7 +57,19 @@ DEFAULT_SUI_PANEL_PATH="panel"
 DEFAULT_SUI_SUBSCRIPTION_PATH="sub"
 SELF_SIGNED_DIR_NAME="selfsigned"
 DEFAULT_INIT_SYSTEM="auto"
-SUPPORTED_INIT_SYSTEMS=("systemd" "openrc" "runit" "s6" "dinit")
+
+# --- Docker images ---
+DEFAULT_SUI_IMAGE="alireza7/s-ui:latest"
+SUI_IMAGE="${SUI_IMAGE:-$DEFAULT_SUI_IMAGE}"
+DEFAULT_CURL_TEST_IMAGE="curlimages/curl:latest"
+DEFAULT_CONTAINER_STAMP=""
+CURL_TEST_IMAGE="${CURL_TEST_IMAGE:-$DEFAULT_CURL_TEST_IMAGE}"
+
+# --- Docker runtime ---
+CONTAINER_NAME="s-ui"
+DOCKER_NETWORK="s-ui"
+DB_TIMEOUT="60"
+DB_POLL_INTERVAL="2"
 
 # --- Terminal color codes (interpreted by printf %b) ---
 COLOR_INFO='\033[0;32m'
@@ -94,6 +105,8 @@ CLI_PANEL_PATH_SET=""
 CLI_SUBSCRIPTION_PATH_SET=""
 CLI_IP_CERT_SET=""
 INIT_SYSTEM="${INIT_SYSTEM:-$DEFAULT_INIT_SYSTEM}"
+CONTAINER_STAMP="${CONTAINER_STAMP:-$DEFAULT_CONTAINER_STAMP}"
+INBOUND_PORTS=""
 EOF__lib_constants
 }
 _embed_lib_utils() {
@@ -126,8 +139,7 @@ resolve_layout() {
 # Core requirement checks
 # ----------------------------------------------------------------------
 check_core_requirements() {
-    require_command docker stat
-    docker compose version >/dev/null 2>&1 || die "docker compose plugin is required"
+    require_command docker sqlite3
 }
 
 # ----------------------------------------------------------------------
@@ -146,9 +158,6 @@ maybe_escalate_privileges() {
     fi
 }
 
-require_root() {
-    [[ "$(id -u)" -eq 0 ]] || die "This command must be run as root"
-}
 
 # ----------------------------------------------------------------------
 # Logging
@@ -275,9 +284,27 @@ assign_config_value() {
         subscription_port)   SUI_SUBSCRIPTION_PORT="$value" ;;
         panel_path)          SUI_PANEL_PATH="$value" ;;
         subscription_path)   SUI_SUBSCRIPTION_PATH="$value" ;;
-        init_system)         INIT_SYSTEM="$value" ;;
+        init_system)
+            case "$value" in
+                auto|systemd|openrc|runit|s6|dinit) INIT_SYSTEM="$value" ;;
+                *) die "Unsupported init_system in config: $value (expected: auto, systemd, openrc, runit, s6, dinit)" ;;
+            esac
+            ;;
+        inbound_ports)      INBOUND_PORTS="$value" ;;
+        sui_image)           SUI_IMAGE="$value" ;;
+        curl_test_image)     CURL_TEST_IMAGE="$value" ;;
+        container_stamp)     CONTAINER_STAMP="$value" ;;
         *) die "Unsupported config key in $CONFIG_FILE_NAME: $key" ;;
     esac
+}
+
+# ----------------------------------------------------------------------
+# File ownership helper
+# ----------------------------------------------------------------------
+ensure_file_ownership() {
+    [[ "$(id -u)" -eq 0 ]] || return 0
+    log_info "Setting ownership of runtime files to $SUI_CONTROL_USER:$SUI_CONTROL_USER"
+    chown -R "$SUI_CONTROL_USER:$SUI_CONTROL_USER" "$@" 2>/dev/null || true
 }
 
 parse_config_file() {
@@ -354,30 +381,24 @@ check_port_80_free() {
     check_tcp_port_free 80 || die "TCP port 80 is already in use"
 }
 
-compose_in_dir() {
-    local dir="$1"
-    cd "$dir" || die "Cannot cd to $dir"
-    [[ -f "$COMPOSE_FILE_NAME" ]] || die "Compose file not found: $dir/$COMPOSE_FILE_NAME"
-}
 
 restart_sui_container() {
-    compose_in_dir "$CONFIG_DIR"
-    if docker compose ps --status running --services 2>/dev/null | grep -qx 's-ui'; then
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx 's-ui'; then
         log_info "Restarting s-ui container"
-        docker compose restart s-ui
+        docker stop s-ui >/dev/null 2>&1 || true
+        docker rm s-ui >/dev/null 2>&1 || true
     else
         log_info "Starting s-ui container"
-        docker compose up -d --remove-orphans s-ui
     fi
-    if ! docker compose ps --status running --services 2>/dev/null | grep -qx 's-ui'; then
-        docker compose logs --no-color s-ui | tail -n 50 >&2 || true
+    start_containers
+    if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -qx 's-ui'; then
+        docker logs s-ui 2>/dev/null | tail -n 50 >&2 || true
         die "s-ui container is not running after restart"
     fi
 }
 
 stop_sui_container_if_running() {
-    compose_in_dir "$CONFIG_DIR"
-    docker compose stop s-ui >/dev/null 2>&1 || true
+    docker stop s-ui >/dev/null 2>&1 || true
 }
 
 ensure_acme_mode() {
@@ -755,7 +776,7 @@ create_generated_file() {
     log_info "Creating $label at: $path"
     old_umask="$(umask)"
     umask 077
-    "$generator" > "$path"
+    "$generator" > "$path" || { umask "$old_umask"; die "Failed to create $label: $path"; }
     umask "$old_umask"
     [[ -n "$mode" ]] && chmod "$mode" "$path"
 }
@@ -768,19 +789,63 @@ assert_nonempty_value() {
     [[ -n "$value" ]] || die "$label must not be empty"
 }
 
+_compute_container_stamp() {
+    local ports
+    ports="$(get_inbound_ports | tr '\n' ',' | sed 's/,$//')"
+    printf '%s' "v1|${ports}|${SUI_PANEL_PORT}|${SUI_SUBSCRIPTION_PORT}|${SUI_IMAGE}|${TZ}"
+}
+
+_update_config_stamp() {
+    local new_stamp="$1"
+    local config_file="$CONFIG_DIR/$CONFIG_FILE_NAME"
+    [[ -f "$config_file" ]] || return
+    if grep -q '^container_stamp=' "$config_file" 2>/dev/null; then
+        sed -i "s#^container_stamp=.*#container_stamp=$new_stamp#" "$config_file"
+    else
+        echo "container_stamp=$new_stamp" >> "$config_file"
+    fi
+}
+
 start_containers() {
-    compose_in_dir "$CONFIG_DIR"
-    docker compose up -d --remove-orphans
+    local port db_path new_stamp
+    local ports_args=()
+
+    db_path="$RUNTIME_DATA_DIR/s-ui.db"
+    if [[ -f "$db_path" ]]; then
+        while IFS= read -r port; do
+            [[ -z "$port" ]] && continue
+            ports_args+=(-p "$port:$port")
+        done < <(get_inbound_ports)
+    fi
+
+    ports_args+=(-p "$SUI_PANEL_PORT:$SUI_PANEL_PORT")
+    ports_args+=(-p "$SUI_SUBSCRIPTION_PORT:$SUI_SUBSCRIPTION_PORT")
+
+    new_stamp="$(_compute_container_stamp)"
+
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$CONTAINER_NAME" && \
+       [[ "$CONTAINER_STAMP" == "$new_stamp" ]]; then
+        return 0
+    fi
+
+    docker network inspect "$DOCKER_NETWORK" >/dev/null 2>&1 || docker network create "$DOCKER_NETWORK" >/dev/null
+    docker stop "$CONTAINER_NAME" 2>/dev/null || true
+    docker rm "$CONTAINER_NAME" 2>/dev/null || true
+
+    docker run -d --restart=unless-stopped --network "$DOCKER_NETWORK" --name "$CONTAINER_NAME" "${ports_args[@]}" -e "TZ=${TZ}" -v "$RUNTIME_DATA_DIR:/app/db" -v "$RUNTIME_CERT_DIR:/certs" "$SUI_IMAGE" >/dev/null
+
+    _update_config_stamp "$new_stamp"
+    CONTAINER_STAMP="$new_stamp"
 }
 
 stop_containers() {
-    compose_in_dir "$CONFIG_DIR"
-    docker compose stop
+    docker stop "$CONTAINER_NAME" 2>/dev/null || true
 }
 
 restart_containers() {
-    compose_in_dir "$CONFIG_DIR"
-    docker compose restart
+    stop_containers
+    docker rm "$CONTAINER_NAME" 2>/dev/null || true
+    start_containers
 }
 
 # ----------------------------------------------------------------------
@@ -1091,10 +1156,10 @@ remove_renewal_timer() {
 # ----------------------------------------------------------------------
 # Runtime artifact initialization and certificate renewal
 # ----------------------------------------------------------------------
-initialize_runtime_artifacts() {
+issue_certificate() {
     local resolved_bin_dir
     ensure_config_loaded
-    compose_in_dir "$CONFIG_DIR"
+
     resolved_bin_dir="$RUNTIME_BIN_DIR"
     if [[ "$CERT_MODE" == "selfsigned" ]]; then
         generate_self_signed_cert
@@ -1140,7 +1205,8 @@ substitute_template() {
     vars="$vars SUI_PANEL_PATH SUI_SUBSCRIPTION_PATH"
     vars="$vars PACKAGE_DIR RUNTIME_CERT_DIR RUNTIME_BIN_DIR RUNTIME_DATA_DIR RUNTIME_ACME_DIR"
     vars="$vars CONFIG_DIR SELF_SIGNED_DIR_NAME SUI_CONTROL_USER"
-    vars="$vars ACME_CERT_SCRIPT_NAME DB_CONFIG_SCRIPT_NAME COMPOSE_FILE_NAME"
+    vars="$vars ACME_CERT_SCRIPT_NAME DB_CONFIG_SCRIPT_NAME"
+    vars="$vars INBOUND_PORTS INIT_SYSTEM SUI_IMAGE CURL_TEST_IMAGE CONTAINER_STAMP"
     vars="$vars SYSTEMD_CONTROL_SERVICE_NAME SYSTEMD_RENEW_SERVICE_NAME SYSTEMD_RENEW_TIMER_NAME"
     vars="$vars SYSTEMD_DST_DIR CRON_DST_DIR CRON_FILE_NAME"
     vars="$vars INSTALL_GENERATED_USERNAME INSTALL_GENERATED_PASSWORD"
@@ -1156,6 +1222,7 @@ substitute_template() {
 # Bootstrap setup (FHS mode — first-time or re-configuration)
 # ----------------------------------------------------------------------
 bootstrap_installation() {
+    setup_sui_user
     _randomize_if_default SUI_PANEL_PORT        "$DEFAULT_SUI_PANEL_PORT"        CLI_PANEL_PORT_SET        ""               generate_random_port 20000 40000
     _randomize_if_default SUI_SUBSCRIPTION_PORT "$DEFAULT_SUI_SUBSCRIPTION_PORT" CLI_SUBSCRIPTION_PORT_SET "$SUI_PANEL_PORT" generate_random_port 20000 40000
     _randomize_if_default SUI_PANEL_PATH        "$DEFAULT_SUI_PANEL_PATH"        CLI_PANEL_PATH_SET        ""               generate_random_path_segment
@@ -1173,7 +1240,7 @@ bootstrap_installation() {
     check_tcp_port_free "$SUI_SUBSCRIPTION_PORT" || die "Subscription TCP port is already in use: $SUI_SUBSCRIPTION_PORT"
 
     if [[ "$CERT_MODE" == "acme" ]]; then
-        local test_image="curlimages/curl:latest"
+        local test_image="$CURL_TEST_IMAGE"
         local urls=("https://acme-v02.api.letsencrypt.org/directory" "https://www.google.com/generate_204")
         local url connected="0"
         for url in "${urls[@]}"; do
@@ -1187,7 +1254,6 @@ bootstrap_installation() {
 
     mkdir -p "$RUNTIME_BIN_DIR" "$RUNTIME_DATA_DIR" "$RUNTIME_CERT_DIR" "$RUNTIME_ACME_DIR" "$RUNTIME_SYSTEMD_DIR"
 
-    substitute_template "$PACKAGE_DIR/templates/docker-compose.yml.tpl" "$CONFIG_DIR/$COMPOSE_FILE_NAME"
     substitute_template "$PACKAGE_DIR/templates/sui-control.conf.tpl"  "$CONFIG_DIR/$CONFIG_FILE_NAME"
     chmod 0600 "$CONFIG_DIR/$CONFIG_FILE_NAME"
 
@@ -1204,28 +1270,29 @@ bootstrap_installation() {
     local db_path="$RUNTIME_DATA_DIR/s-ui.db"
     [[ -x "$db_script" ]] || die "Database configuration script not found: $db_script"
 
-    compose_in_dir "$CONFIG_DIR"
-    docker compose up -d --remove-orphans s-ui
+    start_containers
 
-    local db_timeout=60 db_elapsed=0
+    # shellcheck disable=SC2153
+    local db_timeout="$DB_TIMEOUT" db_elapsed=0
     log_info "Waiting for s-ui to initialize database (up to ${db_timeout}s)..."
     while (( db_elapsed < db_timeout )); do
         [[ -f "$db_path" && -s "$db_path" ]] && break
-        sleep 2
+        sleep "$DB_POLL_INTERVAL"
         db_elapsed=$(( db_elapsed + 2 ))
     done
     if [[ ! -f "$db_path" || ! -s "$db_path" ]]; then
-        docker compose logs --no-color s-ui | tail -n 50 >&2 || true
+        docker logs "$CONTAINER_NAME" 2>/dev/null | tail -n 50 >&2 || true
         die "Database file was not created in time: $db_path"
     fi
 
-    docker compose stop s-ui
+    stop_containers
     [[ -f "$db_path" ]] || die "Database file not found after first start: $db_path"
     "$db_script" "$INSTALL_GENERATED_USERNAME" "$INSTALL_GENERATED_PASSWORD"
-    docker compose up -d --remove-orphans s-ui
+    start_containers
 
-    initialize_runtime_artifacts
+    issue_certificate
     install_renewal_timer
+    ensure_file_ownership "$CONFIG_DIR" "$RUNTIME_DIR"
 
     log_info "Setup completed"
     log_info "Generated username: $INSTALL_GENERATED_USERNAME"
@@ -1249,7 +1316,7 @@ show_usage() {
     [[ -f "$PACKAGE_DIR/VERSION" ]] && ver="$(cat "$PACKAGE_DIR/VERSION")"
     printf 'SUI-Control version %s\n\n' "$ver"
     cat <<'EOF_USAGE'
-SUI-Control installs, configures and maintains an s-ui deployment with Docker Compose.
+SUI-Control installs, configures and maintains an s-ui deployment with Docker.
 
 Usage:
   sui-control.sh <command> [options]
@@ -1261,7 +1328,7 @@ Commands:
   renew                         Renew certificates immediately.
   status                        Show current installation status.
   setup                         Configure deployment interactively (FHS mode).
-  init                          Re-initialize runtime artifacts (regenerate certs, restart).
+  issue-cert                     Issue certificate (force, regardless of schedule)
   service-install               Install and enable timer/service for certificate renewal.
   service-remove                Remove renewal timer/service.
   update                        Pull newer container images and restart services.
@@ -1276,8 +1343,8 @@ Options:
   --timer-on-calendar SPEC      systemd OnCalendar value for renew timer.
   --timer-random-delay SPEC     systemd RandomizedDelaySec value for renew timer.
   --cert-mode MODE              Certificate mode: selfsigned or acme.
-  --panel-port PORT             Panel port exposed by docker-compose.
-  --subscription-port PORT      Subscription port exposed by docker-compose.
+  --panel-port PORT             Panel port.
+  --subscription-port PORT      Subscription port.
   --panel-path PATH             URL path prefix for panel, without leading slash.
   --subscription-path PATH      URL path prefix for subscriptions, without leading slash.
   --yes                         Skip confirmation prompts where possible.
@@ -1308,7 +1375,6 @@ show_status() {
     echo
     echo 'Files and directories:'
     print_path_status 'Config file'           "$CONFIG_DIR/$CONFIG_FILE_NAME"
-    print_path_status 'Compose file'          "$CONFIG_DIR/$COMPOSE_FILE_NAME"
     print_path_status 'Control script'        "$PACKAGE_DIR/$SELF_SCRIPT_NAME"
     print_path_status 'Lib constants'         "$PACKAGE_DIR/lib/constants.sh"
     print_path_status 'Lib utils'             "$PACKAGE_DIR/lib/utils.sh"
@@ -1346,18 +1412,10 @@ show_status() {
         echo 'Docker daemon: unavailable'
     else
         echo 'Docker daemon: reachable'
-        if docker compose version >/dev/null 2>&1; then
-            echo 'Docker compose: available'
-            if [[ -f "$CONFIG_DIR/$COMPOSE_FILE_NAME" ]]; then
-                echo
-                echo 'Docker compose config:'
-                (cd "$CONFIG_DIR" && docker compose config --services) || true
-                echo
-                echo 'Docker compose status:'
-                (cd "$CONFIG_DIR" && docker compose ps -a) || true
-            fi
+        if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx 's-ui'; then
+            echo 's-ui container: running'
         else
-            echo 'Docker compose: unavailable'
+            echo 's-ui container: not running'
         fi
     fi
     echo
@@ -1403,9 +1461,11 @@ show_status() {
 # ----------------------------------------------------------------------
 update_containers() {
     ensure_config_loaded
-    compose_in_dir "$CONFIG_DIR"
-    docker compose pull
-    docker compose up -d --remove-orphans
+    log_info "Pulling latest s-ui image"
+    docker pull "$SUI_IMAGE"
+    stop_containers
+    docker rm s-ui 2>/dev/null || true
+    start_containers
 }
 
 cleanup_docker_artifacts() {
@@ -1422,16 +1482,12 @@ cleanup_docker_artifacts() {
 # Uninstall
 # ----------------------------------------------------------------------
 uninstall_control_script() {
-    [[ -d "$CONFIG_DIR" ]]   || die "Config directory not found: $CONFIG_DIR"
-    [[ -f "$CONFIG_DIR/$CONFIG_FILE_NAME" ]] || die "Config file not found: $CONFIG_DIR/$CONFIG_FILE_NAME"
-    [[ -f "$CONFIG_DIR/$COMPOSE_FILE_NAME" ]] || die "Compose file not found: $CONFIG_DIR/$COMPOSE_FILE_NAME"
-    load_install_config "$CONFIG_DIR/$CONFIG_FILE_NAME"
     if [[ "$AUTO_CONFIRM" != "1" ]]; then
         prompt_yes_no "Remove s-ui installation?" 'n' \
             || { log_info "Uninstall cancelled"; return; }
     fi
     if docker info >/dev/null 2>&1; then
-        (cd "$CONFIG_DIR" && docker compose down -v --remove-orphans) || true
+        docker rm -f s-ui 2>/dev/null || true
     else
         log_warn "Docker daemon not reachable — skip container cleanup"
     fi
@@ -1524,15 +1580,6 @@ dispatch_command() {
         esac
     done
 
-    if [[ "$domain_option_set" == "1" && "$CERT_MODE" != "acme" ]]; then
-        die "Option --domain is allowed only together with --cert-mode acme"
-    fi
-    if [[ "$CLI_IP_CERT_SET" == "1" && "$CERT_MODE" != "acme" ]]; then
-        die "Option --ip is allowed only together with --cert-mode acme"
-    fi
-    if [[ "$domain_option_set" == "1" && "$CLI_IP_CERT_SET" == "1" ]]; then
-        die "Options --domain and --ip are mutually exclusive"
-    fi
 
     case "$COMMAND" in
         setup)
@@ -1564,19 +1611,16 @@ dispatch_command() {
             ensure_config_loaded
             renew_certificate
             ;;
-        renew-now)
-            log_warn "renew-now is deprecated; use 'renew' instead"
-            CURRENT_COMMAND="renew"
+        issue-cert)
+            CURRENT_COMMAND="issue-cert"
+            local _cli_cert_mode="$CERT_MODE" _cli_domain="$DOMAIN"
             check_core_requirements
             ensure_config_loaded
-            renew_certificate
-            ;;
-        init)
-            CURRENT_COMMAND="init"
-            check_core_requirements
+            [[ "$_cli_cert_mode" != "$DEFAULT_CERT_MODE" ]] && CERT_MODE="$_cli_cert_mode"
+            [[ -n "$_cli_domain" && "$_cli_domain" != "$DEFAULT_DOMAIN" ]] && DOMAIN="$_cli_domain"
             [[ "$CERT_MODE" != "selfsigned" ]] || require_command openssl
-            ensure_config_loaded
-            initialize_runtime_artifacts
+            prepare_effective_settings
+            issue_certificate
             ;;
         status)
             CURRENT_COMMAND="status"
@@ -1732,31 +1776,51 @@ PACKAGE_DIR="${PACKAGE_DIR}"
 # shellcheck disable=SC1091
 . "$PACKAGE_DIR/lib/constants.sh"
 # shellcheck disable=SC1091
+. "$PACKAGE_DIR/lib/actions.sh"
+# shellcheck disable=SC1091
 . "$PACKAGE_DIR/lib/utils.sh"
 require_command docker
 ensure_config_loaded
 ensure_acme_mode
-compose_in_dir "$CONFIG_DIR"
 check_port_80_free
 stop_sui_container_if_running
 MODE="${1:-renew}"
 case "$MODE" in
     renew)
         log_info "Running scheduled ACME renewal check"
-        docker compose run --rm -p 80:80 --entrypoint sh acme-sh -c 'set -e; acme.sh --cron --home /acme.sh'
+        docker run --rm -p 80:80 \
+            -v "$RUNTIME_ACME_DIR:/acme.sh" \
+            -v "$RUNTIME_CERT_DIR:/certs" \
+            --entrypoint sh \
+            neilpang/acme.sh:latest \
+            -c 'set -e; acme.sh --cron --home /acme.sh'
         ;;
     issue)
-        acme_flags=""
         if is_ip "$DOMAIN"; then
-            acme_flags="--server letsencrypt --certificate-profile shortlived --days 6"
             log_info "Issuing short-lived IP certificate (valid ~6 days)"
-        fi
-        log_info "Issuing ACME certificate for $DOMAIN"
-        if docker compose run --rm -p 80:80 --entrypoint sh acme-sh \
-                -c "set -e; acme.sh --issue --standalone -d '$DOMAIN' $acme_flags --key-file /certs/server.key --fullchain-file /certs/server.crt --home /acme.sh"; then
-            log_info "Certificate issued successfully"
+            log_info "Issuing ACME certificate for $DOMAIN"
+            if docker run --rm -p 80:80 \
+                    -v "$RUNTIME_ACME_DIR:/acme.sh" \
+                    -v "$RUNTIME_CERT_DIR:/certs" \
+                    --entrypoint sh \
+                    neilpang/acme.sh:latest \
+                    -c "set -e; acme.sh --issue --standalone --server letsencrypt --certificate-profile shortlived --days 6 -d '$DOMAIN' --key-file /certs/server.key --fullchain-file /certs/server.crt --home /acme.sh"; then
+                log_info "Certificate issued successfully"
+            else
+                die "ACME certificate issuance failed"
+            fi
         else
-            die "ACME certificate issuance failed"
+            log_info "Issuing ACME certificate for $DOMAIN"
+            if docker run --rm -p 80:80 \
+                    -v "$RUNTIME_ACME_DIR:/acme.sh" \
+                    -v "$RUNTIME_CERT_DIR:/certs" \
+                    --entrypoint sh \
+                    neilpang/acme.sh:latest \
+                    -c "set -e; acme.sh --issue --standalone -d '$DOMAIN' --key-file /certs/server.key --fullchain-file /certs/server.crt --home /acme.sh"; then
+                log_info "Certificate issued successfully"
+            else
+                die "ACME certificate issuance failed"
+            fi
         fi
         ;;
     *)
@@ -1834,39 +1898,6 @@ log_info "Panel path: $PANEL_PATH"
 log_info "Subscription path: $SUB_PATH"
 EOF__tpl_db_config
 }
-_embed_tpl_compose() {
-    cat <<'EOF__tpl_compose'
-services:
-  s-ui:
-    image: alireza7/s-ui:latest
-    container_name: s-ui
-    restart: unless-stopped
-    networks:
-      - s-ui
-    ports:
-      - "${SUI_PANEL_PORT}:${SUI_PANEL_PORT}"
-      - "${SUI_SUBSCRIPTION_PORT}:${SUI_SUBSCRIPTION_PORT}"
-    environment:
-      TZ: "${TZ}"
-    volumes:
-      - "${RUNTIME_DATA_DIR}:/app/db"
-      - "${RUNTIME_CERT_DIR}:/certs"
-
-  acme-sh:
-    image: neilpang/acme.sh:latest
-    container_name: acme-sh
-    profiles: ["tools"]
-    networks:
-      - s-ui
-    volumes:
-      - "${RUNTIME_ACME_DIR}:/acme.sh"
-      - "${RUNTIME_CERT_DIR}:/certs"
-
-networks:
-  s-ui:
-    driver: bridge
-EOF__tpl_compose
-}
 _embed_tpl_config() {
     cat <<'EOF__tpl_config'
 # sui-control configuration — auto-generated
@@ -1880,7 +1911,11 @@ panel_port=${SUI_PANEL_PORT}
 subscription_port=${SUI_SUBSCRIPTION_PORT}
 panel_path=${SUI_PANEL_PATH}
 subscription_path=${SUI_SUBSCRIPTION_PATH}
+inbound_ports=${INBOUND_PORTS}
 init_system=${INIT_SYSTEM}
+sui_image=${SUI_IMAGE}
+curl_test_image=${CURL_TEST_IMAGE}
+container_stamp=${CONTAINER_STAMP}
 EOF__tpl_config
 }
 
@@ -1891,40 +1926,6 @@ eval "$(_embed_lib_actions)"
 
 # shellcheck disable=SC2154
 # === RUNTIME FILE GENERATORS ===
-
-_gen_compose() {
-    cat <<EOF__compose
-services:
-  s-ui:
-    image: alireza7/s-ui:latest
-    container_name: s-ui
-    restart: unless-stopped
-    networks:
-      - s-ui
-    ports:
-      - "${SUI_PANEL_PORT}:${SUI_PANEL_PORT}"
-      - "${SUI_SUBSCRIPTION_PORT}:${SUI_SUBSCRIPTION_PORT}"
-    environment:
-      TZ: "${TZ}"
-    volumes:
-      - "${RUNTIME_DATA_DIR}:/app/db"
-      - "${RUNTIME_CERT_DIR}:/certs"
-
-  acme-sh:
-    image: neilpang/acme.sh:latest
-    container_name: acme-sh
-    profiles: ["tools"]
-    networks:
-      - s-ui
-    volumes:
-      - "${RUNTIME_ACME_DIR}:/acme.sh"
-      - "${RUNTIME_CERT_DIR}:/certs"
-
-networks:
-  s-ui:
-    driver: bridge
-EOF__compose
-}
 
 _gen_config() {
     cat <<EOF__config
@@ -1939,7 +1940,11 @@ panel_port=${SUI_PANEL_PORT}
 subscription_port=${SUI_SUBSCRIPTION_PORT}
 panel_path=${SUI_PANEL_PATH}
 subscription_path=${SUI_SUBSCRIPTION_PATH}
+inbound_ports=${INBOUND_PORTS}
 init_system=${INIT_SYSTEM}
+sui_image=${SUI_IMAGE}
+curl_test_image=${CURL_TEST_IMAGE}
+container_stamp=${CONTAINER_STAMP}
 EOF__config
 }
 
@@ -1952,31 +1957,51 @@ PACKAGE_DIR="${PACKAGE_DIR}"
 # shellcheck disable=SC1091
 . "$PACKAGE_DIR/lib/constants.sh"
 # shellcheck disable=SC1091
+. "$PACKAGE_DIR/lib/actions.sh"
+# shellcheck disable=SC1091
 . "$PACKAGE_DIR/lib/utils.sh"
 require_command docker
 ensure_config_loaded
 ensure_acme_mode
-compose_in_dir "$CONFIG_DIR"
 check_port_80_free
 stop_sui_container_if_running
 MODE="${1:-renew}"
 case "$MODE" in
     renew)
         log_info "Running scheduled ACME renewal check"
-        docker compose run --rm -p 80:80 --entrypoint sh acme-sh -c 'set -e; acme.sh --cron --home /acme.sh'
+        docker run --rm -p 80:80 \
+            -v "$RUNTIME_ACME_DIR:/acme.sh" \
+            -v "$RUNTIME_CERT_DIR:/certs" \
+            --entrypoint sh \
+            neilpang/acme.sh:latest \
+            -c 'set -e; acme.sh --cron --home /acme.sh'
         ;;
     issue)
-        acme_flags=""
         if is_ip "$DOMAIN"; then
-            acme_flags="--server letsencrypt --certificate-profile shortlived --days 6"
             log_info "Issuing short-lived IP certificate (valid ~6 days)"
-        fi
-        log_info "Issuing ACME certificate for $DOMAIN"
-        if docker compose run --rm -p 80:80 --entrypoint sh acme-sh \
-                -c "set -e; acme.sh --issue --standalone -d '$DOMAIN' $acme_flags --key-file /certs/server.key --fullchain-file /certs/server.crt --home /acme.sh"; then
-            log_info "Certificate issued successfully"
+            log_info "Issuing ACME certificate for $DOMAIN"
+            if docker run --rm -p 80:80 \
+                    -v "$RUNTIME_ACME_DIR:/acme.sh" \
+                    -v "$RUNTIME_CERT_DIR:/certs" \
+                    --entrypoint sh \
+                    neilpang/acme.sh:latest \
+                    -c "set -e; acme.sh --issue --standalone --server letsencrypt --certificate-profile shortlived --days 6 -d '$DOMAIN' --key-file /certs/server.key --fullchain-file /certs/server.crt --home /acme.sh"; then
+                log_info "Certificate issued successfully"
+            else
+                die "ACME certificate issuance failed"
+            fi
         else
-            die "ACME certificate issuance failed"
+            log_info "Issuing ACME certificate for $DOMAIN"
+            if docker run --rm -p 80:80 \
+                    -v "$RUNTIME_ACME_DIR:/acme.sh" \
+                    -v "$RUNTIME_CERT_DIR:/certs" \
+                    --entrypoint sh \
+                    neilpang/acme.sh:latest \
+                    -c "set -e; acme.sh --issue --standalone -d '$DOMAIN' --key-file /certs/server.key --fullchain-file /certs/server.crt --home /acme.sh"; then
+                log_info "Certificate issued successfully"
+            else
+                die "ACME certificate issuance failed"
+            fi
         fi
         ;;
     *)
@@ -2070,7 +2095,7 @@ show_install_help() {
     cat <<'EOF'
 Usage: sui-control-install.sh [options]
 
-Installs s-ui with Docker Compose. Running without options starts an
+Installs s-ui with Docker. Running without options starts an
 interactive installation dialog.
 
 Options:
@@ -2080,8 +2105,8 @@ Options:
   --timer-on-calendar SPEC      systemd OnCalendar value for renew timer.
   --timer-random-delay SPEC     systemd RandomizedDelaySec value for renew timer.
   --cert-mode MODE              Certificate mode: selfsigned or acme.
-  --panel-port PORT             Panel port exposed by docker-compose.
-  --subscription-port PORT      Subscription port exposed by docker-compose.
+  --panel-port PORT             Panel port.
+  --subscription-port PORT      Subscription port.
   --panel-path PATH             URL path prefix for panel, without leading slash.
   --subscription-path PATH      URL path prefix for subscriptions, without leading slash.
   --batch                       Non-interactive install using provided/default values.
@@ -2209,7 +2234,7 @@ EOF_BANNER
     check_tcp_port_free "$SUI_SUBSCRIPTION_PORT" || die "Subscription TCP port is already in use: $SUI_SUBSCRIPTION_PORT"
 
     if [[ "$CERT_MODE" == "acme" ]]; then
-        local test_image="curlimages/curl:latest"
+        local test_image="$CURL_TEST_IMAGE"
         local urls=("https://acme-v02.api.letsencrypt.org/directory" "https://www.google.com/generate_204")
         local url connected="0"
         for url in "${urls[@]}"; do
@@ -2244,14 +2269,12 @@ EOF_BANNER
     create_generated_file "$PACKAGE_DIR" "sui-control.sh"                _embed_entry_point     "0755" "control script"
     create_generated_file "$PACKAGE_DIR" "templates/acme-cert.sh.tpl"         _embed_tpl_acme_cert "0644" "acme template"
     create_generated_file "$PACKAGE_DIR" "templates/s-ui-db-configure.sh.tpl" _embed_tpl_db_config "0644" "db template"
-    create_generated_file "$PACKAGE_DIR" "templates/docker-compose.yml.tpl"   _embed_tpl_compose   "0644" "compose template"
     create_generated_file "$PACKAGE_DIR" "templates/sui-control.conf.tpl"    _embed_tpl_config    "0644" "config template"
 
     # Write VERSION
     printf '%s\n' "$BUILT_VERSION" > "$PACKAGE_DIR/VERSION"
 
     # Generate runtime files to CONFIG_DIR / RUNTIME_DIR
-    create_generated_file "$CONFIG_DIR" "$COMPOSE_FILE_NAME" _gen_compose ""     "compose file"
     create_generated_file "$CONFIG_DIR" "$CONFIG_FILE_NAME"  _gen_config  "0600" "config file"
 
     # Generate bin scripts to RUNTIME_BIN_DIR
@@ -2268,28 +2291,29 @@ EOF_BANNER
     local db_path="$RUNTIME_DATA_DIR/s-ui.db"
     [[ -x "$db_script" ]] || die "Database configuration script not found: $db_script"
 
-    compose_in_dir "$CONFIG_DIR"
-    docker compose up -d --remove-orphans s-ui
+    start_containers
 
-    local db_timeout=60 db_elapsed=0
+    # shellcheck disable=SC2153
+    local db_timeout="$DB_TIMEOUT" db_elapsed=0
     log_info "Waiting for s-ui to initialize database (up to ${db_timeout}s)..."
     while (( db_elapsed < db_timeout )); do
         [[ -f "$db_path" && -s "$db_path" ]] && break
-        sleep 2
+        sleep "$DB_POLL_INTERVAL"
         db_elapsed=$(( db_elapsed + 2 ))
     done
     if [[ ! -f "$db_path" || ! -s "$db_path" ]]; then
-        docker compose logs --no-color s-ui | tail -n 50 >&2 || true
+        docker logs "$CONTAINER_NAME" 2>/dev/null | tail -n 50 >&2 || true
         die "Database file was not created in time: $db_path"
     fi
 
-    docker compose stop s-ui
+    stop_containers
     [[ -f "$db_path" ]] || die "Database file not found after first start: $db_path"
     "$db_script" "$INSTALL_GENERATED_USERNAME" "$INSTALL_GENERATED_PASSWORD"
-    docker compose up -d --remove-orphans s-ui
+    start_containers
 
-    initialize_runtime_artifacts
+    issue_certificate
     install_renewal_timer
+    ensure_file_ownership "$CONFIG_DIR" "$RUNTIME_DIR"
 
     log_info "Installation completed"
     log_info "Generated username: $INSTALL_GENERATED_USERNAME"
