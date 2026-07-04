@@ -23,6 +23,7 @@
 - ACME: `--domain` for FQDN (~90-day cert, weekly timer), `--ip` for IP (~6-day cert, daily timer). Mutually exclusive.
 - Self-signed cert mode handled entirely by `generate_self_signed_cert()` in actions.sh; no ACME interaction.
 - Docker images (`SUI_IMAGE`, `CURL_TEST_IMAGE`, `ACME_IMAGE`) default to `:latest` intentionally — they are overridable via `sui-control.conf`. Pinning is left to the user.
+- GitHub Actions: `actions/checkout@v7` — bump when newer major versions are released
 
 ## Commits
 - Types: feat:, fix:, build:, chore:, ci:, docs:, perf:, refactor:, style:, test:, revert:

@@ -10,11 +10,11 @@ source "$SCRIPT_DIR/lib/constants.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/utils.sh"
 
+# shellcheck disable=SC2034
 PACKAGE_DIR="$SCRIPT_DIR"
 resolve_layout
 
 # Dev config overrides (optional, for local testing)
-[[ -f "$SCRIPT_DIR/config.conf" ]] && parse_config_file "$SCRIPT_DIR/config.conf"
 
 init_config() {
     local cert_mode domain panel_port sub_port ans

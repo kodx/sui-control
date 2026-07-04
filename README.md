@@ -136,7 +136,6 @@ Set `init_system` in config to override auto-detection.
 
 ```
 sui-control/
-├── config.conf              User overrides (not tracked)
 ├── sui-control.sh           Entry point (sources lib/ during dev)
 ├── build/build.sh           Build script
 ├── lib/
@@ -156,15 +155,6 @@ sui-control/
 
 ```bash
 ./build/build.sh    # produces sui-control-install.sh
-```
-
-### Developer config
-
-Create `config.conf` in the project root to override defaults without touching
-`lib/constants.sh`. This file is not tracked by git (listed in `.gitignore`).
-
-```bash
-echo "SUI_PANEL_PORT=3000" >> config.conf
 ```
 
 ### Commit hooks
