@@ -3,6 +3,7 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 jobs:
   release:
@@ -10,8 +11,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Write VERSION from tag
-        run: echo "${GITHUB_REF_NAME#v}" > VERSION
+      - name: Derive version
+        id: version
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            tag="$(git describe --tags --match 'v*' --abbrev=0)"
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+            echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Write VERSION
+        run: echo "${{ steps.version.outputs.version }}" > VERSION
 
       - name: Build install script
         run: bash build/build.sh
@@ -34,7 +47,7 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: sui-control-install.sh
           asset_name: sui-control-install.sh
-          tag: ${{ github.ref_name }}
+          tag: ${{ steps.version.outputs.tag }}
           overwrite: true
 
       - name: Upload deb package
@@ -43,5 +56,5 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: ../sui-control_${{ steps.deb_version.outputs.version }}_all.deb
           asset_name: sui-control_${{ steps.deb_version.outputs.version }}_all.deb
-          tag: ${{ github.ref_name }}
+          tag: ${{ steps.version.outputs.tag }}
           overwrite: true
