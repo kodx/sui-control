@@ -64,6 +64,13 @@ prompt_create_config() {
     if [[ "$ans" =~ ^[yY] ]]; then
         init_config
     else
+        mkdir -p "$CONFIG_DIR"
+        cat > "$CONFIG_DIR/$CONFIG_FILE_NAME" <<EOF_CONFIG
+# sui-control configuration — auto-generated defaults
+cert_mode=$DEFAULT_CERT_MODE
+panel_port=$DEFAULT_SUI_PANEL_PORT
+subscription_port=$DEFAULT_SUI_SUBSCRIPTION_PORT
+EOF_CONFIG
         echo "Using built-in defaults."
     fi
 }

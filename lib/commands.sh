@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# shellcheck disable=SC2034
+# shellcheck disable=SC2034  # cross-file variables used in actions.sh
 # .editorconfig hint: indent_style = space, indent_size = 4
 # SPDX-License-Identifier: GPL-3.0-or-later
 # CLI commands and entry point
@@ -25,6 +25,8 @@ Commands:
   status                        Show current installation status.
   setup                         Configure deployment interactively (FHS mode).
   issue-cert                     Issue certificate (force, regardless of schedule)
+  init-config                   Create or overwrite config file interactively.
+  help                          Show this help message.
   service-install               Install and enable timer/service for certificate renewal.
   service-remove                Remove renewal timer/service.
   update                        Pull newer container images and restart services.
@@ -231,7 +233,7 @@ dispatch_command() {
         case "$1" in
             --domain)
                 require_option_value "$1" "${2-}"
-                DOMAIN="$2"; domain_option_set="1"; shift 2 ;;
+                DOMAIN="$2"; domain_option_set="1"; CLI_DOMAIN_SET="1"; shift 2 ;;
             --ip)
                 require_option_value "$1" "${2-}"
                 DOMAIN="$2"; CLI_IP_CERT_SET="1"; shift 2 ;;
@@ -246,7 +248,7 @@ dispatch_command() {
                 TIMER_RANDOM_DELAY="$2"; shift 2 ;;
             --cert-mode)
                 require_option_value "$1" "${2-}"
-                CERT_MODE="$2"; shift 2 ;;
+                CERT_MODE="$2"; CLI_CERT_MODE_SET="1"; shift 2 ;;
             --panel-port)
                 require_option_value "$1" "${2-}"
                 SUI_PANEL_PORT="$2"
@@ -312,8 +314,8 @@ dispatch_command() {
             local _cli_cert_mode="$CERT_MODE" _cli_domain="$DOMAIN"
             check_core_requirements
             ensure_config_loaded
-            [[ "$_cli_cert_mode" != "$DEFAULT_CERT_MODE" ]] && CERT_MODE="$_cli_cert_mode"
-            [[ -n "$_cli_domain" && "$_cli_domain" != "$DEFAULT_DOMAIN" ]] && DOMAIN="$_cli_domain"
+            [[ -n "$CLI_CERT_MODE_SET" ]] && CERT_MODE="$_cli_cert_mode"
+            [[ "$domain_option_set" == "1" || -n "$CLI_IP_CERT_SET" ]] && DOMAIN="$_cli_domain"
             [[ "$CERT_MODE" != "selfsigned" ]] || require_command openssl
             prepare_effective_settings
             issue_certificate

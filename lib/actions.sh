@@ -98,6 +98,7 @@ prepare_effective_settings() {
     else
         DOMAIN="localhost"
     fi
+    [[ "$SELF_SIGNED_DAYS" =~ ^[0-9]+$ ]]         || die "self_signed_days must be a positive integer: $SELF_SIGNED_DAYS"
     validate_port "Panel port" "$SUI_PANEL_PORT"
     validate_port "Subscription port" "$SUI_SUBSCRIPTION_PORT"
     [[ "$SUI_PANEL_PORT" != "$SUI_SUBSCRIPTION_PORT" ]] \
@@ -310,11 +311,6 @@ run_interactive_installation_dialog() {
 # ----------------------------------------------------------------------
 # Certificate management
 # ----------------------------------------------------------------------
-sanitize_conf_value() {
-    local value="$1"
-    value="${value//$'\n'/ }"
-    printf '%s' "$value"
-}
 
 generate_self_signed_cert() {
     local cert_root cert_cn tmp_conf
@@ -381,16 +377,18 @@ assert_nonempty_value() {
 
 _compute_container_stamp() {
     local ports
-    ports="$(get_inbound_ports | tr '\n' ',' | sed 's/,$//')"
+    ports="$(get_inbound_ports | tr '\n' ',' | sed 's/,$//')" || ports=""
     printf '%s' "v1|${ports}|${SUI_PANEL_PORT}|${SUI_SUBSCRIPTION_PORT}|${SUI_IMAGE}|${TZ}"
 }
 
 get_inbound_ports() {
-    local db_path="$RUNTIME_DATA_DIR/s-ui.db"
+    local db_path="$RUNTIME_DATA_DIR/s-ui.db" result
     [[ -f "$db_path" ]] || return
-    sqlite3 "$db_path" \
+    result="$(sqlite3 "$db_path" \
       "SELECT DISTINCT json_extract(options, '$.listen_port') FROM inbounds \
-       WHERE json_extract(options, '$.listen_port') IS NOT NULL ORDER BY 1;"
+       WHERE json_extract(options, '$.listen_port') IS NOT NULL ORDER BY 1;")" || return 1
+    [[ -n "$result" ]] || return
+    printf '%s\n' "$result"
 }
 
 _update_config_stamp() {
@@ -518,7 +516,7 @@ EOF_TIMER
     ln -sfn "$timer_file"           "$timer_link"
     systemctl daemon-reload
     systemctl enable --now "$SYSTEMD_CONTROL_SERVICE_NAME"  >/dev/null 2>&1 || true
-    systemctl enable --now "$SYSTEMD_RENEW_TIMER_NAME"
+    systemctl enable --now "$SYSTEMD_RENEW_TIMER_NAME" >/dev/null 2>&1 || true
 }
 
 _remove_timer_systemd() {
@@ -763,6 +761,7 @@ issue_certificate() {
         generate_self_signed_cert
         restart_sui_container
     elif [[ "$CERT_MODE" == "acme" ]]; then
+        [[ -x "$resolved_bin_dir/$ACME_CERT_SCRIPT_NAME" ]]             || die "ACME cert script not found: $resolved_bin_dir/$ACME_CERT_SCRIPT_NAME"
         "$resolved_bin_dir/$ACME_CERT_SCRIPT_NAME" issue
     fi
 }
@@ -817,6 +816,47 @@ substitute_template() {
 }
 
 # ----------------------------------------------------------------------
+
+# ----------------------------------------------------------------------
+# Shared core for bootstrap_installation and install_control_script
+# ----------------------------------------------------------------------
+_run_installation_core() {
+    local db_script="$RUNTIME_BIN_DIR/$DB_CONFIG_SCRIPT_NAME"
+    local db_path="$RUNTIME_DATA_DIR/s-ui.db"
+    [[ -x "$db_script" ]] || die "Database configuration script not found: $db_script"
+
+    ensure_config_loaded "$CONFIG_DIR/$CONFIG_FILE_NAME"
+
+    start_containers
+
+    # shellcheck disable=SC2153
+    local db_timeout="$DB_TIMEOUT" db_elapsed=0
+    log_info "Waiting for s-ui to initialize database (up to ${db_timeout}s)..."
+    while (( db_elapsed < db_timeout )); do
+        [[ -f "$db_path" && -s "$db_path" ]] && break
+        sleep "$DB_POLL_INTERVAL"
+        db_elapsed=$(( db_elapsed + DB_POLL_INTERVAL ))
+    done
+    if [[ ! -f "$db_path" || ! -s "$db_path" ]]; then
+        docker logs "$CONTAINER_NAME" 2>/dev/null | tail -n 50 >&2 || true
+        die "Database file was not created in time: $db_path"
+    fi
+
+    stop_containers
+    [[ -f "$db_path" ]] || die "Database file not found after first start: $db_path"
+    "$db_script" "$INSTALL_GENERATED_USERNAME" "$INSTALL_GENERATED_PASSWORD"
+    start_containers
+
+    issue_certificate
+    install_renewal_timer
+    ensure_file_ownership "$CONFIG_DIR" "$RUNTIME_DIR"
+
+    log_info "$1"
+    log_info "Generated username: $INSTALL_GENERATED_USERNAME"
+    log_info "Generated password: $INSTALL_GENERATED_PASSWORD"
+}
+
+# ----------------------------------------------------------------------
 # Bootstrap setup (FHS mode — first-time or re-configuration)
 # ----------------------------------------------------------------------
 bootstrap_installation() {
@@ -861,37 +901,5 @@ bootstrap_installation() {
     substitute_template "$PACKAGE_DIR/templates/s-ui-db-configure.sh.tpl" "$RUNTIME_BIN_DIR/$DB_CONFIG_SCRIPT_NAME"
     chmod 0755 "$RUNTIME_BIN_DIR/$DB_CONFIG_SCRIPT_NAME"
 
-    ensure_config_loaded "$CONFIG_DIR/$CONFIG_FILE_NAME"
-
-    local db_script="$RUNTIME_BIN_DIR/$DB_CONFIG_SCRIPT_NAME"
-    local db_path="$RUNTIME_DATA_DIR/s-ui.db"
-    [[ -x "$db_script" ]] || die "Database configuration script not found: $db_script"
-
-    start_containers
-
-    # shellcheck disable=SC2153
-    local db_timeout="$DB_TIMEOUT" db_elapsed=0
-    log_info "Waiting for s-ui to initialize database (up to ${db_timeout}s)..."
-    while (( db_elapsed < db_timeout )); do
-        [[ -f "$db_path" && -s "$db_path" ]] && break
-        sleep "$DB_POLL_INTERVAL"
-        db_elapsed=$(( db_elapsed + DB_POLL_INTERVAL ))
-    done
-    if [[ ! -f "$db_path" || ! -s "$db_path" ]]; then
-        docker logs "$CONTAINER_NAME" 2>/dev/null | tail -n 50 >&2 || true
-        die "Database file was not created in time: $db_path"
-    fi
-
-    stop_containers
-    [[ -f "$db_path" ]] || die "Database file not found after first start: $db_path"
-    "$db_script" "$INSTALL_GENERATED_USERNAME" "$INSTALL_GENERATED_PASSWORD"
-    start_containers
-
-    issue_certificate
-    install_renewal_timer
-    ensure_file_ownership "$CONFIG_DIR" "$RUNTIME_DIR"
-
-    log_info "Setup completed"
-    log_info "Generated username: $INSTALL_GENERATED_USERNAME"
-    log_info "Generated password: $INSTALL_GENERATED_PASSWORD"
+    _run_installation_core "Setup completed"
 }

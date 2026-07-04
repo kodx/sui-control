@@ -12,9 +12,9 @@ curl -sSLo sui-control-install.sh \
   https://github.com/kodx/sui-control/releases/latest/download/sui-control-install.sh
 chmod +x sui-control-install.sh && ./sui-control-install.sh
 
-# Or deb package (Debian/Ubuntu)
-curl -sSLo /tmp/sui-control.deb \
-  https://github.com/kodx/sui-control/releases/latest/download/sui-control_all.deb
+# Or deb package (Debian/Ubuntu) — download from
+# https://github.com/kodx/sui-control/releases/latest
+curl -sSLo /tmp/sui-control.deb "$(curl -s https://api.github.com/repos/kodx/sui-control/releases/latest | grep browser_download_url | grep '\.deb"' | cut -d'"' -f4)"
 sudo dpkg -i /tmp/sui-control.deb
 ```
 

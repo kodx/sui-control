@@ -200,37 +200,5 @@ EOF_BANNER
 
     chown -R "$SUI_CONTROL_USER:$SUI_CONTROL_USER" "$PACKAGE_DIR" "$CONFIG_DIR" "$RUNTIME_DIR"
 
-    ensure_config_loaded "$CONFIG_DIR/$CONFIG_FILE_NAME"
-
-    local db_script="$RUNTIME_BIN_DIR/$DB_CONFIG_SCRIPT_NAME"
-    local db_path="$RUNTIME_DATA_DIR/s-ui.db"
-    [[ -x "$db_script" ]] || die "Database configuration script not found: $db_script"
-
-    start_containers
-
-    # shellcheck disable=SC2153
-    local db_timeout="$DB_TIMEOUT" db_elapsed=0
-    log_info "Waiting for s-ui to initialize database (up to ${db_timeout}s)..."
-    while (( db_elapsed < db_timeout )); do
-        [[ -f "$db_path" && -s "$db_path" ]] && break
-        sleep "$DB_POLL_INTERVAL"
-        db_elapsed=$(( db_elapsed + DB_POLL_INTERVAL ))
-    done
-    if [[ ! -f "$db_path" || ! -s "$db_path" ]]; then
-        docker logs "$CONTAINER_NAME" 2>/dev/null | tail -n 50 >&2 || true
-        die "Database file was not created in time: $db_path"
-    fi
-
-    stop_containers
-    [[ -f "$db_path" ]] || die "Database file not found after first start: $db_path"
-    "$db_script" "$INSTALL_GENERATED_USERNAME" "$INSTALL_GENERATED_PASSWORD"
-    start_containers
-
-    issue_certificate
-    install_renewal_timer
-    ensure_file_ownership "$CONFIG_DIR" "$RUNTIME_DIR"
-
-    log_info "Installation completed"
-    log_info "Generated username: $INSTALL_GENERATED_USERNAME"
-    log_info "Generated password: $INSTALL_GENERATED_PASSWORD"
+    _run_installation_core "Installation completed"
 }

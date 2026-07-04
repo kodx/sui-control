@@ -2,6 +2,7 @@
 
 ## Build & verify
 - Build: `bash build/build.sh` → produces `sui-control-install.sh` (available in GitHub Releases). Run whenever `lib/`, `templates/`, or `sui-control.sh` changes.
+- Version bump: `bash build/bump-version.sh <major|minor|patch>` — bumps semver, updates `debian/changelog`, creates annotated tag. Add `--dry-run` to preview.
 - Pre-commit: `.githooks/pre-commit` runs shellcheck on staged `.sh` files and actionlint on workflows. Set up via `git config core.hooksPath .githooks`.
 - `build.sh` also runs shellcheck on source files and the built artifact. A failing build means shellcheck errors.
 
@@ -21,6 +22,7 @@
 - `# shellcheck disable=SCxxxx` on specific lines only; file-wide only for cross-file variables (SC2034, SC2154, SC2153 in built artifact)
 - ACME: `--domain` for FQDN (~90-day cert, weekly timer), `--ip` for IP (~6-day cert, daily timer). Mutually exclusive.
 - Self-signed cert mode handled entirely by `generate_self_signed_cert()` in actions.sh; no ACME interaction.
+- Docker images (`SUI_IMAGE`, `CURL_TEST_IMAGE`, `ACME_IMAGE`) default to `:latest` intentionally — they are overridable via `sui-control.conf`. Pinning is left to the user.
 
 ## Commits
 - Types: feat:, fix:, build:, chore:, ci:, docs:, perf:, refactor:, style:, test:, revert:

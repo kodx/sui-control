@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # .editorconfig hint: indent_style = space, indent_size = 4
 # SPDX-License-Identifier: GPL-3.0-or-later
-# shellcheck disable=SC2016
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -70,8 +69,11 @@ generate_gen_func() {
     echo
 
     echo '# === INSTALLER RUNTIME ==='
+# shellcheck disable=SC2016
     echo 'eval "$(_embed_lib_constants)"'
+# shellcheck disable=SC2016
     echo 'eval "$(_embed_lib_utils)"'
+# shellcheck disable=SC2016
     echo 'eval "$(_embed_lib_actions)"'
     echo
 
