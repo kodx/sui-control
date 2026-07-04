@@ -10,6 +10,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Write VERSION from tag
+        run: echo "${GITHUB_REF_NAME#v}" > VERSION
+
       - name: Build install script
         run: bash build/build.sh
 

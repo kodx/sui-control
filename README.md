@@ -137,7 +137,6 @@ Set `init_system` in config to override auto-detection.
 ```
 sui-control/
 ├── config.conf              User overrides (not tracked)
-├── VERSION                  Single source of version truth
 ├── sui-control.sh           Entry point (sources lib/ during dev)
 ├── build/build.sh           Build script
 ├── lib/

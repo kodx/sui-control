@@ -1,7 +1,7 @@
 # SUI-Control — Agent instructions
 
 ## Build & verify
-- Build: `bash build/build.sh` → produces `sui-control-install.sh` (available in GitHub Releases). Run whenever `lib/`, `templates/`, `sui-control.sh`, or `VERSION` changes.
+- Build: `bash build/build.sh` → produces `sui-control-install.sh` (available in GitHub Releases). Run whenever `lib/`, `templates/`, or `sui-control.sh` changes.
 - Pre-commit: `.githooks/pre-commit` runs shellcheck on staged `.sh` files and actionlint on workflows. Set up via `git config core.hooksPath .githooks`.
 - `build.sh` also runs shellcheck on source files and the built artifact. A failing build means shellcheck errors.
 
@@ -13,12 +13,11 @@
   - Runtime data: `/var/lib/sui-control/` (`bin/`, `db/`, `cert/`, `acme/`, `systemd/`)
 - **Init system abstraction**: `install_renewal_timer`/`remove_renewal_timer` dispatch to 5 backends (systemd, OpenRC, runit, s6, dinit). Non-systemd backends create cron job for renewal.
 - **Service commands** (`start`, `stop`, `restart`) allow `sui-control.sh` to be used as a system service script by any init system.
-- **`VERSION` file** in repo root — single source of version truth.
 
 ## Conventions
 - `lib/*.sh`: no shebang (sourced), SPDX header (GPL-3.0-or-later), `.editorconfig` hint
 - `sui-control.sh`: `#!/usr/bin/env bash`, reads `VERSION` at runtime, sets `PACKAGE_DIR`
-- `build/build.sh`: `#!/usr/bin/env bash`, reads `VERSION`, embeds as `readonly BUILT_VERSION`
+- `build/build.sh`: `#!/usr/bin/env bash`, auto-generates `VERSION` from git tag or defaults to `0.0.0-dev`, embeds as `readonly BUILT_VERSION`
 - `# shellcheck disable=SCxxxx` on specific lines only; file-wide only for cross-file variables (SC2034, SC2154, SC2153 in built artifact)
 - ACME: `--domain` for FQDN (~90-day cert, weekly timer), `--ip` for IP (~6-day cert, daily timer). Mutually exclusive.
 - Self-signed cert mode handled entirely by `generate_self_signed_cert()` in actions.sh; no ACME interaction.

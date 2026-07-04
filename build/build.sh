@@ -7,6 +7,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 OUTPUT="$PROJECT_DIR/sui-control-install.sh"
+
+if [[ ! -f "$PROJECT_DIR/VERSION" ]]; then
+    if tag="$(git -C "$PROJECT_DIR" describe --tags --match 'v*' --abbrev=0 2>/dev/null)"; then
+        echo "${tag#v}" > "$PROJECT_DIR/VERSION"
+    else
+        echo '0.0.0-dev' > "$PROJECT_DIR/VERSION"
+    fi
+fi
 VERSION="$(cat "$PROJECT_DIR/VERSION")"
 
 # Validate VERSION is semver
