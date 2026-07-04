@@ -1,12 +1,12 @@
 # SUI-Control — Agent instructions
 
 ## Build & verify
-- Build: `bash build/build.sh` → produces `sui-control-install.sh` (committed). Run whenever `lib/`, `templates/`, `sui-control.sh`, or `VERSION` changes.
+- Build: `bash build/build.sh` → produces `sui-control-install.sh` (available in GitHub Releases). Run whenever `lib/`, `templates/`, `sui-control.sh`, or `VERSION` changes.
 - Pre-commit: `.githooks/pre-commit` runs shellcheck on staged `.sh` files and actionlint on workflows. Set up via `git config core.hooksPath .githooks`.
 - `build.sh` also runs shellcheck on source files and the built artifact. A failing build means shellcheck errors.
 
 ## Architecture
-- **Two entry points**: `sui-control.sh` (development/manager) and `sui-control-install.sh` (self-contained installer)
+- **Two entry points**: `sui-control.sh` (development/manager) and `sui-control-install.sh` (self-contained installer, available from GitHub Releases)
 - **FHS layout**:
   - Package (`lib/`, `templates/`, `sui-control.sh`, `VERSION`): auto-detected from `$(dirname "$(realpath "$0")")`, or `/opt/s-ui` when installed
   - Config: `/etc/sui-control/sui-control.conf`

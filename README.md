@@ -4,15 +4,26 @@ Install, configure and maintain an [s-ui](https://github.com/alireza0/s-ui) depl
 
 ## Quick start
 
+Download from the [latest release](https://github.com/kodx/sui-control/releases/latest):
+
 ```bash
-curl -sSL https://raw.githubusercontent.com/.../sui-control-install.sh | bash
+# Install script (any Linux with Docker)
+curl -sSLo sui-control-install.sh \
+  https://github.com/kodx/sui-control/releases/latest/download/sui-control-install.sh
+chmod +x sui-control-install.sh && ./sui-control-install.sh
+
+# Or deb package (Debian/Ubuntu)
+curl -sSLo /tmp/sui-control.deb \
+  https://github.com/kodx/sui-control/releases/latest/download/sui-control_all.deb
+sudo dpkg -i /tmp/sui-control.deb
 ```
 
-Or clone the repo and run the installer locally:
+Or clone and build locally:
 
 ```bash
-git clone https://github.com/.../sui-control.git
+git clone https://github.com/kodx/sui-control.git
 cd sui-control
+bash build/build.sh
 ./sui-control-install.sh
 ```
 
@@ -128,7 +139,6 @@ sui-control/
 ├── config.conf              User overrides (not tracked)
 ├── VERSION                  Single source of version truth
 ├── sui-control.sh           Entry point (sources lib/ during dev)
-├── sui-control-install.sh   Built artifact (committed)
 ├── build/build.sh           Build script
 ├── lib/
 │   ├── constants.sh             Constants, defaults, globals

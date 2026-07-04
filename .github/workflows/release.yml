@@ -1,0 +1,44 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build install script
+        run: bash build/build.sh
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq dpkg-dev debhelper
+
+      - name: Build deb package
+        run: dpkg-buildpackage -us -uc -b
+
+      - name: Get deb version
+        id: deb_version
+        run: echo "version=$(dpkg-parsechangelog -S Version)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload install script
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: sui-control-install.sh
+          asset_name: sui-control-install.sh
+          tag: ${{ github.ref_name }}
+          overwrite: true
+
+      - name: Upload deb package
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ../sui-control_${{ steps.deb_version.outputs.version }}_all.deb
+          asset_name: sui-control_${{ steps.deb_version.outputs.version }}_all.deb
+          tag: ${{ github.ref_name }}
+          overwrite: true
