@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2154
 set -euo pipefail
-PACKAGE_DIR="${PACKAGE_DIR}"
 # shellcheck disable=SC1091
 . "$PACKAGE_DIR/lib/constants.sh"
 # shellcheck disable=SC1091
@@ -32,7 +31,7 @@ case "$MODE" in
                     -v "$RUNTIME_ACME_DIR:/acme.sh" \
                     -v "$RUNTIME_CERT_DIR:/certs" \
                     --entrypoint sh \
-                    neilpang/acme.sh:latest \
+                    "$ACME_IMAGE" \
                     -c "set -e; acme.sh --issue --standalone --server letsencrypt --certificate-profile shortlived --days 6 -d '$DOMAIN' --key-file /certs/server.key --fullchain-file /certs/server.crt --home /acme.sh"; then
                 log_info "Certificate issued successfully"
             else
@@ -44,7 +43,7 @@ case "$MODE" in
                     -v "$RUNTIME_ACME_DIR:/acme.sh" \
                     -v "$RUNTIME_CERT_DIR:/certs" \
                     --entrypoint sh \
-                    neilpang/acme.sh:latest \
+                    "$ACME_IMAGE" \
                     -c "set -e; acme.sh --issue --standalone -d '$DOMAIN' --key-file /certs/server.key --fullchain-file /certs/server.crt --home /acme.sh"; then
                 log_info "Certificate issued successfully"
             else

@@ -2,8 +2,9 @@
 # shellcheck disable=SC2154
 set -euo pipefail
 
-PACKAGE_DIR="${PACKAGE_DIR}"
+# shellcheck disable=SC1091
 . "$PACKAGE_DIR/lib/constants.sh"
+# shellcheck disable=SC1091
 . "$PACKAGE_DIR/lib/utils.sh"
 
 require_command sqlite3
