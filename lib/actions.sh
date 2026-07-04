@@ -529,7 +529,7 @@ _remove_timer_systemd() {
         systemctl stop "$SYSTEMD_RENEW_SERVICE_NAME"            >/dev/null 2>&1 || true
     fi
     rm -f "$control_link" "$renew_svc_link" "$timer_link"
-    command_exists systemctl && systemctl daemon-reload || true
+if command_exists systemctl; then systemctl daemon-reload || true; fi
 }
 
 # ----------------------------------------------------------------------
@@ -568,11 +568,11 @@ OPENRC_INIT
     chmod 0755 "$init_file"
 
     _create_cron_job
-    command_exists rc-update && rc-update add sui-control default || true
+    if command_exists rc-update; then rc-update add sui-control default || true; fi
 }
 
 _remove_timer_openrc() {
-    command_exists rc-update && rc-update del sui-control default >/dev/null 2>&1 || true
+    if command_exists rc-update; then rc-update del sui-control default >/dev/null 2>&1 || true; fi
     rm -f "/etc/init.d/sui-control"
     _remove_cron_job
 }
@@ -645,11 +645,11 @@ waits-for = docker
 DINIT_SVC
 
     _create_cron_job
-    command_exists dinitctl && dinitctl enable sui-control || true
+    if command_exists dinitctl; then dinitctl enable sui-control || true; fi
 }
 
 _remove_timer_dinit() {
-    command_exists dinitctl && dinitctl disable sui-control >/dev/null 2>&1 || true
+    if command_exists dinitctl; then dinitctl disable sui-control >/dev/null 2>&1 || true; fi
     rm -f "/etc/dinit.d/sui-control"
     _remove_cron_job
 }
