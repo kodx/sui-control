@@ -21,7 +21,7 @@ case "$MODE" in
             -v "$RUNTIME_ACME_DIR:/acme.sh" \
             -v "$RUNTIME_CERT_DIR:/certs" \
             --entrypoint sh \
-            neilpang/acme.sh:latest \
+            "$ACME_IMAGE" \
             -c 'set -e; acme.sh --cron --home /acme.sh'
         ;;
     issue)

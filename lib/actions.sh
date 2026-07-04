@@ -385,6 +385,14 @@ _compute_container_stamp() {
     printf '%s' "v1|${ports}|${SUI_PANEL_PORT}|${SUI_SUBSCRIPTION_PORT}|${SUI_IMAGE}|${TZ}"
 }
 
+get_inbound_ports() {
+    local db_path="$RUNTIME_DATA_DIR/s-ui.db"
+    [[ -f "$db_path" ]] || return
+    sqlite3 "$db_path" \
+      "SELECT DISTINCT json_extract(options, '$.listen_port') FROM inbounds \
+       WHERE json_extract(options, '$.listen_port') IS NOT NULL ORDER BY 1;"
+}
+
 _update_config_stamp() {
     local new_stamp="$1"
     local config_file="$CONFIG_DIR/$CONFIG_FILE_NAME"
@@ -796,7 +804,7 @@ substitute_template() {
     vars="$vars PACKAGE_DIR RUNTIME_CERT_DIR RUNTIME_BIN_DIR RUNTIME_DATA_DIR RUNTIME_ACME_DIR"
     vars="$vars CONFIG_DIR SELF_SIGNED_DIR_NAME SUI_CONTROL_USER"
     vars="$vars ACME_CERT_SCRIPT_NAME DB_CONFIG_SCRIPT_NAME"
-    vars="$vars INBOUND_PORTS INIT_SYSTEM SUI_IMAGE CURL_TEST_IMAGE CONTAINER_STAMP"
+    vars="$vars INBOUND_PORTS INIT_SYSTEM SUI_IMAGE CURL_TEST_IMAGE CONTAINER_STAMP ACME_IMAGE"
     vars="$vars SYSTEMD_CONTROL_SERVICE_NAME SYSTEMD_RENEW_SERVICE_NAME SYSTEMD_RENEW_TIMER_NAME"
     vars="$vars SYSTEMD_DST_DIR CRON_DST_DIR CRON_FILE_NAME"
     vars="$vars INSTALL_GENERATED_USERNAME INSTALL_GENERATED_PASSWORD"
@@ -830,11 +838,10 @@ bootstrap_installation() {
     check_tcp_port_free "$SUI_SUBSCRIPTION_PORT" || die "Subscription TCP port is already in use: $SUI_SUBSCRIPTION_PORT"
 
     if [[ "$CERT_MODE" == "acme" ]]; then
-        local test_image="$CURL_TEST_IMAGE"
         local urls=("https://acme-v02.api.letsencrypt.org/directory" "https://www.google.com/generate_204")
         local url connected="0"
         for url in "${urls[@]}"; do
-            if docker run --rm "$test_image" -fsSL --connect-timeout 10 --max-time 20 "$url" >/dev/null 2>&1; then
+            if docker run --rm "$CURL_TEST_IMAGE" -fsSL --connect-timeout 10 --max-time 20 "$url" >/dev/null 2>&1; then
                 connected="1"
                 break
             fi
@@ -868,7 +875,7 @@ bootstrap_installation() {
     while (( db_elapsed < db_timeout )); do
         [[ -f "$db_path" && -s "$db_path" ]] && break
         sleep "$DB_POLL_INTERVAL"
-        db_elapsed=$(( db_elapsed + 2 ))
+        db_elapsed=$(( db_elapsed + DB_POLL_INTERVAL ))
     done
     if [[ ! -f "$db_path" || ! -s "$db_path" ]]; then
         docker logs "$CONTAINER_NAME" 2>/dev/null | tail -n 50 >&2 || true

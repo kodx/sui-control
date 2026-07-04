@@ -150,11 +150,10 @@ EOF_BANNER
     check_tcp_port_free "$SUI_SUBSCRIPTION_PORT" || die "Subscription TCP port is already in use: $SUI_SUBSCRIPTION_PORT"
 
     if [[ "$CERT_MODE" == "acme" ]]; then
-        local test_image="$CURL_TEST_IMAGE"
         local urls=("https://acme-v02.api.letsencrypt.org/directory" "https://www.google.com/generate_204")
         local url connected="0"
         for url in "${urls[@]}"; do
-            if docker run --rm "$test_image" -fsSL --connect-timeout 10 --max-time 20 "$url" >/dev/null 2>&1; then
+            if docker run --rm "$CURL_TEST_IMAGE" -fsSL --connect-timeout 10 --max-time 20 "$url" >/dev/null 2>&1; then
                 connected="1"
                 break
             fi
@@ -215,7 +214,7 @@ EOF_BANNER
     while (( db_elapsed < db_timeout )); do
         [[ -f "$db_path" && -s "$db_path" ]] && break
         sleep "$DB_POLL_INTERVAL"
-        db_elapsed=$(( db_elapsed + 2 ))
+        db_elapsed=$(( db_elapsed + DB_POLL_INTERVAL ))
     done
     if [[ ! -f "$db_path" || ! -s "$db_path" ]]; then
         docker logs "$CONTAINER_NAME" 2>/dev/null | tail -n 50 >&2 || true

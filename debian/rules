@@ -1,3 +1,4 @@
 #!/usr/bin/make -f
 %:
+	[ -f VERSION ] || echo '0.0.0-dev' > VERSION
 	dh $@

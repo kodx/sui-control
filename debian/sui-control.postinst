@@ -26,13 +26,9 @@ case "$1" in
 
   SUI-Control installed.
 
-  To run commands without sudo, add yourself to the 'sui-control' group:
-    sudo usermod -aG sui-control \$USER
-  Then log out and back in.
-
-  Run 'sui-control.sh setup' to configure your deployment.
-  This will install the service for auto-start at boot.
-  (Use 'sudo sui-control.sh setup' if you skip the group step.)
+  Run 'sudo sui-control.sh setup' to configure your deployment.
+  This will create runtime directories, configure s-ui, and
+  install the service for auto-start at boot.
 
 MSG
         ;;

@@ -14,3 +14,4 @@ init_system=${INIT_SYSTEM}
 sui_image=${SUI_IMAGE}
 curl_test_image=${CURL_TEST_IMAGE}
 container_stamp=${CONTAINER_STAMP}
+acme_image=${ACME_IMAGE}

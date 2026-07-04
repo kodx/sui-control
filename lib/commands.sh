@@ -108,7 +108,7 @@ show_status() {
         echo 'Docker daemon: unavailable'
     else
         echo 'Docker daemon: reachable'
-        if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx 's-ui'; then
+        if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$CONTAINER_NAME"; then
             echo 's-ui container: running'
         else
             echo 's-ui container: not running'
@@ -160,7 +160,7 @@ update_containers() {
     log_info "Pulling latest s-ui image"
     docker pull "$SUI_IMAGE"
     stop_containers
-    docker rm s-ui 2>/dev/null || true
+    docker rm "$CONTAINER_NAME" 2>/dev/null || true
     start_containers
 }
 
@@ -183,7 +183,7 @@ uninstall_control_script() {
             || { log_info "Uninstall cancelled"; return; }
     fi
     if docker info >/dev/null 2>&1; then
-        docker rm -f s-ui 2>/dev/null || true
+        docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
     else
         log_warn "Docker daemon not reachable — skip container cleanup"
     fi

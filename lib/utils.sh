@@ -180,6 +180,7 @@ assign_config_value() {
         inbound_ports)      INBOUND_PORTS="$value" ;;
         sui_image)           SUI_IMAGE="$value" ;;
         curl_test_image)     CURL_TEST_IMAGE="$value" ;;
+        acme_image)          ACME_IMAGE="$value" ;;
         container_stamp)     CONTAINER_STAMP="$value" ;;
         *) die "Unsupported config key in $CONFIG_FILE_NAME: $key" ;;
     esac
@@ -270,22 +271,22 @@ check_port_80_free() {
 
 
 restart_sui_container() {
-    if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx 's-ui'; then
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$CONTAINER_NAME"; then
         log_info "Restarting s-ui container"
-        docker stop s-ui >/dev/null 2>&1 || true
-        docker rm s-ui >/dev/null 2>&1 || true
+        docker stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
+        docker rm "$CONTAINER_NAME" >/dev/null 2>&1 || true
     else
         log_info "Starting s-ui container"
     fi
     start_containers
-    if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -qx 's-ui'; then
-        docker logs s-ui 2>/dev/null | tail -n 50 >&2 || true
+    if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$CONTAINER_NAME"; then
+        docker logs "$CONTAINER_NAME" 2>/dev/null | tail -n 50 >&2 || true
         die "s-ui container is not running after restart"
     fi
 }
 
 stop_sui_container_if_running() {
-    docker stop s-ui >/dev/null 2>&1 || true
+    docker stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
 }
 
 ensure_acme_mode() {
