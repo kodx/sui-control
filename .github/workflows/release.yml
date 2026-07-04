@@ -20,8 +20,8 @@ jobs:
             echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
             echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
           else
-            tag="$(git describe --tags --match 'v*' --abbrev=0 2>/dev/null)" || tag="v0.0.0-dev"
-            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+            tag="$(git tag --list 'v*' --sort=-v:refname | head -1)"
+            echo "tag=${tag:-v0.0.0-dev}" >> "$GITHUB_OUTPUT"
             echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
           fi
 
