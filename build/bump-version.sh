@@ -31,7 +31,7 @@ parse_args() {
         *) echo "Error: expected major|minor|patch, got: $1" >&2; usage; exit 1 ;;
     esac
     shift
-    [[ "$1" == "--dry-run" ]] && { DRY_RUN=1; shift; }
+    [[ "${1:-}" == "--dry-run" ]] && { DRY_RUN=1; shift; }
     [[ $# -eq 0 ]] || { echo "Error: unexpected argument: $1" >&2; usage; exit 1; }
 }
 
