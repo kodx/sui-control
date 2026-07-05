@@ -12,8 +12,7 @@ usage() {
     cat <<'EOF'
 Usage: bump-version.sh <major|minor|patch> [--dry-run]
 
-Bump the project version: updates build/debian/changelog and creates an
-annotated git tag.
+Bump the project version and create an annotated git tag.
 
 Examples:
   bash build/bump-version.sh patch     # 1.4.0 → 1.4.1
@@ -55,30 +54,6 @@ bump_version() {
     printf '%s.%s.%s' "$major" "$minor" "$patch"
 }
 
-update_changelog() {
-    local new_version="$1" date_str
-    date_str="$(date -R)"  # RFC 2822 date
-
-    cat > /tmp/changelog_entry.txt <<CHLOG
-sui-control (${new_version}-1) stable; urgency=medium
-
-  * New release.
-
- -- kodx <dev@kodx.org>  ${date_str}
-
-CHLOG
-
-    if [[ "$DRY_RUN" == "1" ]]; then
-        echo "    [dry-run] would prepend to $PROJECT_DIR/build/debian/changelog:"
-        sed 's/^/      /' /tmp/changelog_entry.txt
-    else
-        cat /tmp/changelog_entry.txt "$PROJECT_DIR/build/debian/changelog" \
-            > /tmp/changelog_merged.txt
-        mv /tmp/changelog_merged.txt "$PROJECT_DIR/build/debian/changelog"
-        echo "    build/debian/changelog: updated"
-    fi
-    rm -f /tmp/changelog_entry.txt
-}
 
 create_tag() {
     local new_version="$1"
@@ -105,7 +80,6 @@ main() {
     echo "Tag:     $tag"
     echo
 
-    update_changelog "$new_version"
     create_tag "$new_version"
 
     echo

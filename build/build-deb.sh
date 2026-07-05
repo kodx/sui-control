@@ -7,6 +7,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 cd "$PROJECT_DIR"
+version="$(cat VERSION 2>/dev/null || git describe --tags --match 'v*' --abbrev=0 2>/dev/null | sed 's/^v//' || echo '0.0.0-dev')"
+date_rfc="$(date -R)"
+cat > build/debian/changelog <<EOF
+sui-control (${version}-1) stable; urgency=medium
+
+  * see git log
+
+ -- kodx <dev@kodx.org>  ${date_rfc}
+
+EOF
 ln -sf build/debian debian
 dpkg-buildpackage -us -uc -b
 deb_version="$(dpkg-parsechangelog -S Version)"

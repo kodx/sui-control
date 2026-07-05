@@ -2,7 +2,7 @@
 
 ## Build & verify
 - Build: `bash build/build.sh` → produces `sui-control-install.sh` (available in GitHub Releases). Run whenever `lib/`, `templates/`, or `sui-control.sh` changes.
-- Version bump: `bash build/bump-version.sh <major|minor|patch>` — bumps semver, updates `build/debian/changelog`, creates annotated tag. Add `--dry-run` to preview.
+- Version bump: `bash build/bump-version.sh <major|minor|patch>` — bumps semver, creates annotated tag. Add `--dry-run` to preview.
 - Pre-commit: `.githooks/pre-commit` runs shellcheck on staged `.sh` files and actionlint on workflows. Set up via `git config core.hooksPath .githooks`.
 - `build.sh` also runs shellcheck on source files and the built artifact. A failing build means shellcheck errors.
 
