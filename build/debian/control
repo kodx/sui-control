@@ -15,7 +15,7 @@ Depends: ${misc:Depends},
  sqlite3,
  adduser,
  gettext-base,
- docker.io | docker
+ docker.io | docker-ce
 Description: manage s-ui deployments with Docker
  SUI-Control installs, configures and maintains an s-ui deployment
  with Docker. Supports ACME (Let's Encrypt) and self-signed
