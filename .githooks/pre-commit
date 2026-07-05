@@ -9,41 +9,49 @@ checks_passed=0
 checks_failed=0
 
 # --- shellcheck ---
-echo ":: shellcheck on all project .sh files..."
-if shellcheck .githooks/pre-commit lib/*.sh sui-control.sh build/*.sh templates/*.sh.tpl 2>&1; then
-    echo -e "${GREEN}   shellcheck passed${NC}"
-    ((checks_passed += 1))
+if command -v shellcheck &>/dev/null; then
+    echo ":: shellcheck on all project .sh files..."
+    if shellcheck .githooks/pre-commit lib/*.sh sui-control.sh build/*.sh templates/*.sh.tpl 2>&1; then
+        echo -e "${GREEN}   shellcheck passed${NC}"
+        ((checks_passed += 1))
+    else
+        echo -e "${RED}   shellcheck FAILED${NC}"
+        ((checks_failed += 1))
+    fi
 else
-    echo -e "${RED}   shellcheck FAILED${NC}"
-    ((checks_failed += 1))
+    echo ":: shellcheck not found, skipping"
 fi
 
 # --- actionlint ---
-staged_actions="$(git diff --cached --name-only --diff-filter=ACM | grep '^\.github/workflows/.*\.yml$' || true)"
-if [[ -n "$staged_actions" ]]; then
-    echo ":: actionlint on staged workflow files..."
-    if echo "$staged_actions" | xargs -r actionlint 2>&1; then
-        echo -e "${GREEN}   actionlint passed${NC}"
-        ((checks_passed += 1))
+if command -v actionlint &>/dev/null; then
+    staged_actions="$(git diff --cached --name-only --diff-filter=ACM | grep '^\.github/workflows/.*\.yml$' || true)"
+    if [[ -n "$staged_actions" ]]; then
+        echo ":: actionlint on staged workflow files..."
+        if echo "$staged_actions" | xargs -r actionlint 2>&1; then
+            echo -e "${GREEN}   actionlint passed${NC}"
+            ((checks_passed += 1))
+        else
+            echo -e "${RED}   actionlint FAILED${NC}"
+            ((checks_failed += 1))
+        fi
+    elif [[ -d .github/workflows ]]; then
+        echo ":: actionlint on all workflow files..."
+        if actionlint 2>&1; then
+            echo -e "${GREEN}   actionlint passed${NC}"
+            ((checks_passed += 1))
+        else
+            echo -e "${RED}   actionlint FAILED${NC}"
+            ((checks_failed += 1))
+        fi
     else
-        echo -e "${RED}   actionlint FAILED${NC}"
-        ((checks_failed += 1))
-    fi
-elif [[ -d .github/workflows ]]; then
-    echo ":: actionlint on all workflow files..."
-    if actionlint 2>&1; then
-        echo -e "${GREEN}   actionlint passed${NC}"
-        ((checks_passed += 1))
-    else
-        echo -e "${RED}   actionlint FAILED${NC}"
-        ((checks_failed += 1))
+        echo ":: no .github/workflows directory, skipping actionlint"
     fi
 else
-    echo ":: no .github/workflows directory, skipping actionlint"
+    echo ":: actionlint not found, skipping"
 fi
 
 # --- shellcheck on debian maintainer scripts ---
-staged_deb="$(git diff --cached --name-only --diff-filter=ACM | grep '^debian/.*\\(postinst\\|prerm\\|postrm\\)$' || true)"
+staged_deb="$(git diff --cached --name-only --diff-filter=ACM | grep '^build/debian/.*\\(postinst\\|prerm\\|postrm\\)$' || true)"
 if [[ -n "$staged_deb" ]]; then
     echo ":: shellcheck on debian maintainer scripts..."
     if echo "$staged_deb" | xargs -r shellcheck 2>&1; then

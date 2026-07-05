@@ -2,7 +2,7 @@
 
 ## Build & verify
 - Build: `bash build/build.sh` → produces `sui-control-install.sh` (available in GitHub Releases). Run whenever `lib/`, `templates/`, or `sui-control.sh` changes.
-- Version bump: `bash build/bump-version.sh <major|minor|patch>` — bumps semver, updates `debian/changelog`, creates annotated tag. Add `--dry-run` to preview.
+- Version bump: `bash build/bump-version.sh <major|minor|patch>` — bumps semver, updates `build/debian/changelog`, creates annotated tag. Add `--dry-run` to preview.
 - Pre-commit: `.githooks/pre-commit` runs shellcheck on staged `.sh` files and actionlint on workflows. Set up via `git config core.hooksPath .githooks`.
 - `build.sh` also runs shellcheck on source files and the built artifact. A failing build means shellcheck errors.
 
@@ -16,6 +16,7 @@
 - **Service commands** (`start`, `stop`, `restart`) allow `sui-control.sh` to be used as a system service script by any init system.
 
 ## Conventions
+- `templates/*.conf.tpl`: no SPDX (config template, not a script)
 - `lib/*.sh`: no shebang (sourced), SPDX header (GPL-3.0-or-later), `.editorconfig` hint
 - `sui-control.sh`: `#!/usr/bin/env bash`, reads `VERSION` at runtime, sets `PACKAGE_DIR`
 - `build/build.sh`: `#!/usr/bin/env bash`, auto-generates `VERSION` from git tag or defaults to `0.0.0-dev`, embeds as `readonly BUILT_VERSION`

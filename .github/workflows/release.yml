@@ -39,11 +39,8 @@ jobs:
           sudo apt-get install -y -qq build-essential dpkg-dev debhelper
 
       - name: Build deb package
-        run: dpkg-buildpackage -us -uc -b
-
-      - name: Get deb version
-        id: deb_version
-        run: echo "version=$(dpkg-parsechangelog -S Version)" >> "$GITHUB_OUTPUT"
+        id: deb_build
+        run: bash build/build-deb.sh
 
       - name: Upload install script
         uses: svenstaro/upload-release-action@v2
@@ -58,7 +55,7 @@ jobs:
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: ../sui-control_${{ steps.deb_version.outputs.version }}_all.deb
-          asset_name: sui-control_${{ steps.deb_version.outputs.version }}_all.deb
+          file: ../sui-control_${{ steps.deb_build.outputs.version }}_all.deb
+          asset_name: sui-control_${{ steps.deb_build.outputs.version }}_all.deb
           tag: ${{ steps.version.outputs.tag }}
           overwrite: true

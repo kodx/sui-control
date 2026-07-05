@@ -12,7 +12,7 @@ usage() {
     cat <<'EOF'
 Usage: bump-version.sh <major|minor|patch> [--dry-run]
 
-Bump the project version: updates debian/changelog and creates an
+Bump the project version: updates build/debian/changelog and creates an
 annotated git tag.
 
 Examples:
@@ -69,13 +69,13 @@ sui-control (${new_version}-1) stable; urgency=medium
 CHLOG
 
     if [[ "$DRY_RUN" == "1" ]]; then
-        echo "    [dry-run] would prepend to $PROJECT_DIR/debian/changelog:"
+        echo "    [dry-run] would prepend to $PROJECT_DIR/build/debian/changelog:"
         sed 's/^/      /' /tmp/changelog_entry.txt
     else
-        cat /tmp/changelog_entry.txt "$PROJECT_DIR/debian/changelog" \
+        cat /tmp/changelog_entry.txt "$PROJECT_DIR/build/debian/changelog" \
             > /tmp/changelog_merged.txt
-        mv /tmp/changelog_merged.txt "$PROJECT_DIR/debian/changelog"
-        echo "    debian/changelog: updated"
+        mv /tmp/changelog_merged.txt "$PROJECT_DIR/build/debian/changelog"
+        echo "    build/debian/changelog: updated"
     fi
     rm -f /tmp/changelog_entry.txt
 }

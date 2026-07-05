@@ -9,7 +9,7 @@ Rules-Requires-Root: no
 Package: sui-control
 Architecture: all
 Depends: ${misc:Depends},
- bash (>= 4),
+ bash (>= 4.3),
  coreutils,
  openssl,
  sqlite3,

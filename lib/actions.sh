@@ -68,10 +68,20 @@ detect_init_system() {
     INIT_SYSTEM="unsupported"
 }
 
+detect_os_id() {
+    [[ "$OS_ID" != "auto" ]] && return
+    if [[ -f /etc/os-release ]]; then
+        OS_ID="$(grep -oP '(?<=^ID=).*' /etc/os-release | tr -d '"')"
+    else
+        OS_ID="unknown"
+    fi
+}
+
 # ----------------------------------------------------------------------
 # Effective settings
 # ----------------------------------------------------------------------
 prepare_effective_settings() {
+    detect_os_id
     case "$CERT_MODE" in
         selfsigned|acme) ;;
         *) die "Unsupported certificate mode: $CERT_MODE" ;;
@@ -382,44 +392,46 @@ _compute_container_stamp() {
 }
 
 get_inbound_ports() {
-    local db_path="$RUNTIME_DATA_DIR/s-ui.db" result
-    [[ -f "$db_path" ]] || return
-    result="$(sqlite3 "$db_path" \
-      "SELECT DISTINCT json_extract(options, '$.listen_port') FROM inbounds \
-       WHERE json_extract(options, '$.listen_port') IS NOT NULL ORDER BY 1;")" || return 1
-    [[ -n "$result" ]] || return
-    printf '%s\n' "$result"
+    [[ -n "$INBOUND_PORTS" ]] || return 0
+    tr ',' '\n' <<< "$INBOUND_PORTS" | sort -n
 }
 
 _update_config_stamp() {
     local new_stamp="$1"
+    local escaped_stamp
     local config_file="$CONFIG_DIR/$CONFIG_FILE_NAME"
     [[ -f "$config_file" ]] || return
+    escaped_stamp="$(printf '%s\n' "$new_stamp" | sed 's/[#/&\\]/\\&/g')"
     if grep -q '^container_stamp=' "$config_file" 2>/dev/null; then
-        sed -i "s#^container_stamp=.*#container_stamp=$new_stamp#" "$config_file"
+        sed -i "s/^container_stamp=.*/container_stamp=$escaped_stamp/" "$config_file"
     else
         echo "container_stamp=$new_stamp" >> "$config_file"
     fi
 }
-
 start_containers() {
-    local port db_path new_stamp
+    local port new_stamp
     local ports_args=()
 
-    db_path="$RUNTIME_DATA_DIR/s-ui.db"
-    if [[ -f "$db_path" ]]; then
-        while IFS= read -r port; do
-            [[ -z "$port" ]] && continue
-            ports_args+=(-p "$port:$port")
-        done < <(get_inbound_ports)
-    fi
+    while IFS= read -r port; do
+        [[ -z "$port" ]] && continue
+        [[ "$port" =~ ^[0-9]+$ && "$port" -ge 1 && "$port" -le 65535 ]] || {
+            log_warn "Invalid inbound port, skipping: $port"
+            continue
+        }
+        ports_args+=(-p "$port:$port")
+    done < <(get_inbound_ports)
 
     ports_args+=(-p "$SUI_PANEL_PORT:$SUI_PANEL_PORT")
     ports_args+=(-p "$SUI_SUBSCRIPTION_PORT:$SUI_SUBSCRIPTION_PORT")
 
+    if [[ -n "${TZ:-}" && ! "$TZ" =~ ^[A-Za-z0-9_+/-]+$ ]]; then
+        log_warn "Invalid TZ value, skipping timezone configuration: $TZ"
+        unset TZ
+    fi
+
     new_stamp="$(_compute_container_stamp)"
 
-    if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$CONTAINER_NAME" && \
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$CONTAINER_NAME" && 
        [[ "$CONTAINER_STAMP" == "$new_stamp" ]]; then
         return 0
     fi
@@ -428,19 +440,21 @@ start_containers() {
     docker stop "$CONTAINER_NAME" 2>/dev/null || true
     docker rm "$CONTAINER_NAME" 2>/dev/null || true
 
-    docker run -d --restart=unless-stopped --network "$DOCKER_NETWORK" --name "$CONTAINER_NAME" "${ports_args[@]}" -e "TZ=${TZ}" -v "$RUNTIME_DATA_DIR:/app/db" -v "$RUNTIME_CERT_DIR:/certs" "$SUI_IMAGE" >/dev/null
+    docker run -d --restart=unless-stopped --network "$DOCKER_NETWORK" --name "$CONTAINER_NAME" "${ports_args[@]}" ${TZ:+-e TZ="$TZ"} -v "$RUNTIME_DATA_DIR:/app/db" -v "$RUNTIME_CERT_DIR:/certs:ro" "$SUI_IMAGE" >/dev/null
 
     _update_config_stamp "$new_stamp"
     CONTAINER_STAMP="$new_stamp"
 }
 
+# ----------------------------------------------------------------------
+# Container lifecycle helpers
+# ----------------------------------------------------------------------
 stop_containers() {
-    docker stop "$CONTAINER_NAME" 2>/dev/null || true
+    docker stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
 }
 
 restart_containers() {
     stop_containers
-    docker rm "$CONTAINER_NAME" 2>/dev/null || true
     start_containers
 }
 
@@ -791,27 +805,29 @@ print_path_status() {
 }
 
 # ----------------------------------------------------------------------
+# Template variable whitelist (derived from sui-control.conf.tpl)
+# ----------------------------------------------------------------------
+_get_shell_fmt_from_config_tpl() {
+    local tpl="$PACKAGE_DIR/templates/sui-control.conf.tpl"
+    [[ -f "$tpl" ]] || die "Config template not found: $tpl"
+    grep -oP '\$\{[A-Z_][A-Z0-9_]*\}' "$tpl" | sort -u | tr '\n' ' '
+}
+
+# ----------------------------------------------------------------------
 # Template substitution for FHS-mode setup
 # ----------------------------------------------------------------------
 substitute_template() {
     local template="$1" output="$2"
     [[ -f "$template" ]] || die "Template not found: $template"
-    local vars
-    vars="DOMAIN TZ TIMER_ON_CALENDAR TIMER_RANDOM_DELAY CERT_MODE"
-    vars="$vars SELF_SIGNED_DAYS SUI_PANEL_PORT SUI_SUBSCRIPTION_PORT"
-    vars="$vars SUI_PANEL_PATH SUI_SUBSCRIPTION_PATH"
-    vars="$vars PACKAGE_DIR RUNTIME_CERT_DIR RUNTIME_BIN_DIR RUNTIME_DATA_DIR RUNTIME_ACME_DIR"
-    vars="$vars CONFIG_DIR SELF_SIGNED_DIR_NAME SUI_CONTROL_USER"
-    vars="$vars ACME_CERT_SCRIPT_NAME DB_CONFIG_SCRIPT_NAME"
-    vars="$vars INBOUND_PORTS INIT_SYSTEM SUI_IMAGE CURL_TEST_IMAGE CONTAINER_STAMP ACME_IMAGE"
-    vars="$vars SYSTEMD_CONTROL_SERVICE_NAME SYSTEMD_RENEW_SERVICE_NAME SYSTEMD_RENEW_TIMER_NAME"
-    vars="$vars SYSTEMD_DST_DIR CRON_DST_DIR CRON_FILE_NAME"
-    vars="$vars INSTALL_GENERATED_USERNAME INSTALL_GENERATED_PASSWORD"
+    local shell_fmt entry v
+    shell_fmt="$(_get_shell_fmt_from_config_tpl)"
     (
-        for v in $vars; do
+        for entry in $shell_fmt; do
+            [[ -z "$entry" ]] && continue
+            v="${entry#\$\{}"; v="${v%\}}";
             export "${v}=${!v:-}"
         done
-        envsubst < "$template" > "$output"
+        envsubst "$shell_fmt" < "$template" > "$output"
     )
 }
 

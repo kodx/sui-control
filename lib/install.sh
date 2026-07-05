@@ -193,10 +193,20 @@ EOF_BANNER
     create_generated_file "$CONFIG_DIR" "$CONFIG_FILE_NAME"  _gen_config  "0600" "config file"
 
     # Generate bin scripts to RUNTIME_BIN_DIR
+    local _shell_fmt _entry _v
+    _shell_fmt="$(_get_shell_fmt_from_config_tpl)"
+    for _entry in $_shell_fmt; do
+        [[ -z "$_entry" ]] && continue
+        _v="${_entry#\$\{}"; _v="${_v%\}}"
+        export "${_v}=${!_v:-}"
+    done
+
     if [[ "$CERT_MODE" == "acme" ]]; then
-        create_generated_file "$RUNTIME_BIN_DIR" "$ACME_CERT_SCRIPT_NAME" _gen_acme "0755" "acme cert script"
+        _gen_acme | envsubst "$_shell_fmt" > "$RUNTIME_BIN_DIR/$ACME_CERT_SCRIPT_NAME"
+        chmod 0755 "$RUNTIME_BIN_DIR/$ACME_CERT_SCRIPT_NAME"
     fi
-    create_generated_file "$RUNTIME_BIN_DIR" "$DB_CONFIG_SCRIPT_NAME" _gen_db "0755" "db config script"
+    _gen_db | envsubst "$_shell_fmt" > "$RUNTIME_BIN_DIR/$DB_CONFIG_SCRIPT_NAME"
+    chmod 0755 "$RUNTIME_BIN_DIR/$DB_CONFIG_SCRIPT_NAME"
 
     chown -R "$SUI_CONTROL_USER:$SUI_CONTROL_USER" "$PACKAGE_DIR" "$CONFIG_DIR" "$RUNTIME_DIR"
 

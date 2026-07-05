@@ -72,16 +72,16 @@ show_status() {
     echo "Subscription base URL: https://$DOMAIN:$SUI_SUBSCRIPTION_PORT/$SUI_SUBSCRIPTION_PATH/"
     echo
     echo 'Files and directories:'
-    print_path_status 'Config file'           "$CONFIG_DIR/$CONFIG_FILE_NAME"
-    print_path_status 'Control script'        "$PACKAGE_DIR/$SELF_SCRIPT_NAME"
-    print_path_status 'Lib constants'         "$PACKAGE_DIR/lib/constants.sh"
-    print_path_status 'Lib utils'             "$PACKAGE_DIR/lib/utils.sh"
-    print_path_status 'DB config script'      "$RUNTIME_BIN_DIR/$DB_CONFIG_SCRIPT_NAME"
-    print_path_status 'Data directory'        "$RUNTIME_DATA_DIR"
+    print_path_status 'Config file' "$CONFIG_DIR/$CONFIG_FILE_NAME"
+    print_path_status 'Control script' "$PACKAGE_DIR/$SELF_SCRIPT_NAME"
+    print_path_status 'Lib constants' "$PACKAGE_DIR/lib/constants.sh"
+    print_path_status 'Lib utils' "$PACKAGE_DIR/lib/utils.sh"
+    print_path_status 'DB config script' "$RUNTIME_BIN_DIR/$DB_CONFIG_SCRIPT_NAME"
+    print_path_status 'Data directory' "$RUNTIME_DATA_DIR"
     print_path_status 'Certificate directory' "$RUNTIME_CERT_DIR"
     if [[ "$CERT_MODE" == "acme" ]]; then
-        print_path_status 'ACME cert script'  "$RUNTIME_BIN_DIR/$ACME_CERT_SCRIPT_NAME"
-        print_path_status 'ACME directory'    "$RUNTIME_ACME_DIR"
+        print_path_status 'ACME cert script' "$RUNTIME_BIN_DIR/$ACME_CERT_SCRIPT_NAME"
+        print_path_status 'ACME directory' "$RUNTIME_ACME_DIR"
     fi
     echo
     echo 'Certificate:'
@@ -121,36 +121,36 @@ show_status() {
     detect_init_system
     echo "Init system: $INIT_SYSTEM"
     case "$INIT_SYSTEM" in
-        systemd)
-            if command_exists systemctl; then
-                echo "Control service: $(systemctl is-active "$SYSTEMD_CONTROL_SERVICE_NAME" 2>/dev/null || echo unknown)"
-                echo "Renew timer (enabled): $(systemctl is-enabled "$SYSTEMD_RENEW_TIMER_NAME" 2>/dev/null || echo unknown)"
-                echo "Renew timer (active):  $(systemctl is-active  "$SYSTEMD_RENEW_TIMER_NAME" 2>/dev/null || echo unknown)"
-            fi
-            ;;
-        openrc)
-            if command_exists rc-service; then
-                echo "Service: $(rc-service sui-control status 2>/dev/null || echo 'check rc-service')"
-            fi
-            ;;
-        runit)
-            if command_exists sv; then
-                echo "Service: $(sv status sui-control 2>/dev/null || echo 'check sv status')"
-            fi
-            ;;
-        s6)
-            if command_exists s6-svstat; then
-                echo "Service: $(s6-svstat "$S6_SERVICE_DIR" 2>/dev/null || echo 'check s6-svstat')"
-            fi
-            ;;
-        dinit)
-            if command_exists dinitctl; then
-                echo "Service: $(dinitctl status sui-control 2>/dev/null || echo 'check dinitctl')"
-            fi
-            ;;
-        *)
-            echo "Service: no supported init system detected"
-            ;;
+    systemd)
+        if command_exists systemctl; then
+            echo "Control service: $(systemctl is-active "$SYSTEMD_CONTROL_SERVICE_NAME" 2>/dev/null || echo unknown)"
+            echo "Renew timer (enabled): $(systemctl is-enabled "$SYSTEMD_RENEW_TIMER_NAME" 2>/dev/null || echo unknown)"
+            echo "Renew timer (active):  $(systemctl is-active "$SYSTEMD_RENEW_TIMER_NAME" 2>/dev/null || echo unknown)"
+        fi
+        ;;
+    openrc)
+        if command_exists rc-service; then
+            echo "Service: $(rc-service sui-control status 2>/dev/null || echo 'check rc-service')"
+        fi
+        ;;
+    runit)
+        if command_exists sv; then
+            echo "Service: $(sv status sui-control 2>/dev/null || echo 'check sv status')"
+        fi
+        ;;
+    s6)
+        if command_exists s6-svstat; then
+            echo "Service: $(s6-svstat "$S6_SERVICE_DIR" 2>/dev/null || echo 'check s6-svstat')"
+        fi
+        ;;
+    dinit)
+        if command_exists dinitctl; then
+            echo "Service: $(dinitctl status sui-control 2>/dev/null || echo 'check dinitctl')"
+        fi
+        ;;
+    *)
+        echo "Service: no supported init system detected"
+        ;;
     esac
 }
 
@@ -181,13 +181,19 @@ cleanup_docker_artifacts() {
 # ----------------------------------------------------------------------
 uninstall_control_script() {
     if [[ "$AUTO_CONFIRM" != "1" ]]; then
-        prompt_yes_no "Remove s-ui installation?" 'n' \
-            || { log_info "Uninstall cancelled"; return; }
+        prompt_yes_no "Remove s-ui installation?" 'n' ||
+            {
+                log_info "Uninstall cancelled"
+                return
+            }
     fi
     if docker info >/dev/null 2>&1; then
         docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
     else
         log_warn "Docker daemon not reachable — skip container cleanup"
+    fi
+    if [[ -z "${RUNTIME_DIR:-}" || -z "${CONFIG_DIR:-}" ]]; then
+        die "Refusing to remove empty RUNTIME_DIR or CONFIG_DIR"
     fi
     rm -rf -- "$RUNTIME_DIR" "$CONFIG_DIR"
     remove_renewal_timer
@@ -231,142 +237,166 @@ dispatch_command() {
     local domain_option_set="0"
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --domain)
-                require_option_value "$1" "${2-}"
-                DOMAIN="$2"; domain_option_set="1"; CLI_DOMAIN_SET="1"; shift 2 ;;
-            --ip)
-                require_option_value "$1" "${2-}"
-                DOMAIN="$2"; CLI_IP_CERT_SET="1"; shift 2 ;;
-            --tz)
-                require_option_value "$1" "${2-}" 1
-                TZ="$2"; shift 2 ;;
-            --timer-on-calendar)
-                require_option_value "$1" "${2-}"
-                TIMER_ON_CALENDAR="$2"; shift 2 ;;
-            --timer-random-delay)
-                require_option_value "$1" "${2-}"
-                TIMER_RANDOM_DELAY="$2"; shift 2 ;;
-            --cert-mode)
-                require_option_value "$1" "${2-}"
-                CERT_MODE="$2"; CLI_CERT_MODE_SET="1"; shift 2 ;;
-            --panel-port)
-                require_option_value "$1" "${2-}"
-                SUI_PANEL_PORT="$2"
-                CLI_PANEL_PORT_SET="1"
-                shift 2 ;;
-            --subscription-port)
-                require_option_value "$1" "${2-}"
-                SUI_SUBSCRIPTION_PORT="$2"
-                CLI_SUBSCRIPTION_PORT_SET="1"
-                shift 2 ;;
-            --panel-path)
-                require_option_value "$1" "${2-}"
-                SUI_PANEL_PATH="$2"
-                CLI_PANEL_PATH_SET="1"
-                shift 2 ;;
-            --subscription-path)
-                require_option_value "$1" "${2-}"
-                SUI_SUBSCRIPTION_PATH="$2"
-                CLI_SUBSCRIPTION_PATH_SET="1"
-                shift 2 ;;
-            --yes)
-                AUTO_CONFIRM="1"; shift ;;
-            -h|--help)
-                show_usage; exit 0 ;;
-            *)
-                die "Unknown option: $1" ;;
+        --domain)
+            require_option_value "$1" "${2-}"
+            DOMAIN="$2"
+            domain_option_set="1"
+            CLI_DOMAIN_SET="1"
+            shift 2
+            ;;
+        --ip)
+            require_option_value "$1" "${2-}"
+            DOMAIN="$2"
+            CLI_IP_CERT_SET="1"
+            shift 2
+            ;;
+        --tz)
+            require_option_value "$1" "${2-}" 1
+            TZ="$2"
+            shift 2
+            ;;
+        --timer-on-calendar)
+            require_option_value "$1" "${2-}"
+            TIMER_ON_CALENDAR="$2"
+            shift 2
+            ;;
+        --timer-random-delay)
+            require_option_value "$1" "${2-}"
+            TIMER_RANDOM_DELAY="$2"
+            shift 2
+            ;;
+        --cert-mode)
+            require_option_value "$1" "${2-}"
+            CERT_MODE="$2"
+            CLI_CERT_MODE_SET="1"
+            shift 2
+            ;;
+        --panel-port)
+            require_option_value "$1" "${2-}"
+            SUI_PANEL_PORT="$2"
+            CLI_PANEL_PORT_SET="1"
+            shift 2
+            ;;
+        --subscription-port)
+            require_option_value "$1" "${2-}"
+            SUI_SUBSCRIPTION_PORT="$2"
+            CLI_SUBSCRIPTION_PORT_SET="1"
+            shift 2
+            ;;
+        --panel-path)
+            require_option_value "$1" "${2-}"
+            SUI_PANEL_PATH="$2"
+            CLI_PANEL_PATH_SET="1"
+            shift 2
+            ;;
+        --subscription-path)
+            require_option_value "$1" "${2-}"
+            SUI_SUBSCRIPTION_PATH="$2"
+            CLI_SUBSCRIPTION_PATH_SET="1"
+            shift 2
+            ;;
+        --yes)
+            AUTO_CONFIRM="1"
+            shift
+            ;;
+        -h | --help)
+            show_usage
+            exit 0
+            ;;
+        *)
+            die "Unknown option: $1"
+            ;;
         esac
     done
 
-
     case "$COMMAND" in
-        setup)
-            CURRENT_COMMAND="setup"
-            check_core_requirements
-            bootstrap_installation
-            ;;
-        start)
-            CURRENT_COMMAND="start"
-            check_core_requirements
-            ensure_config_loaded
-            start_containers
-            ;;
-        stop)
-            CURRENT_COMMAND="stop"
-            check_core_requirements
-            ensure_config_loaded
-            stop_containers
-            ;;
-        restart)
-            CURRENT_COMMAND="restart"
-            check_core_requirements
-            ensure_config_loaded
-            restart_containers
-            ;;
-        renew)
-            CURRENT_COMMAND="renew"
-            check_core_requirements
-            ensure_config_loaded
-            renew_certificate
-            ;;
-        issue-cert)
-            CURRENT_COMMAND="issue-cert"
-            local _cli_cert_mode="$CERT_MODE" _cli_domain="$DOMAIN"
-            check_core_requirements
-            ensure_config_loaded
-            [[ -n "$CLI_CERT_MODE_SET" ]] && CERT_MODE="$_cli_cert_mode"
-            [[ "$domain_option_set" == "1" || -n "$CLI_IP_CERT_SET" ]] && DOMAIN="$_cli_domain"
-            [[ "$CERT_MODE" != "selfsigned" ]] || require_command openssl
-            prepare_effective_settings
-            issue_certificate
-            ;;
-        status)
-            CURRENT_COMMAND="status"
-            show_status
-            ;;
-        service-install)
-            CURRENT_COMMAND="service-install"
-            if [[ "$(id -u)" -ne 0 ]]; then
-                maybe_escalate_privileges "${original_args[@]}"
-            fi
-            ensure_config_loaded
-            install_renewal_timer
-            ;;
-        service-remove)
-            CURRENT_COMMAND="service-remove"
-            if [[ "$(id -u)" -ne 0 ]]; then
-                maybe_escalate_privileges "${original_args[@]}"
-            fi
-            ensure_config_loaded
-            remove_renewal_timer
-            ;;
-        update)
-            CURRENT_COMMAND="update"
-            check_core_requirements
-            ensure_config_loaded
-            update_containers
-            ;;
-        cleanup)
-            CURRENT_COMMAND="cleanup"
-            check_core_requirements
-            cleanup_docker_artifacts
-            ;;
-        cleanup-all)
-            CURRENT_COMMAND="cleanup-all"
-            check_core_requirements
-            cleanup_docker_artifacts 1
-            ;;
-        uninstall)
-            CURRENT_COMMAND="uninstall"
-            if [[ "$(id -u)" -ne 0 ]]; then
-                maybe_escalate_privileges "${original_args[@]}"
-            fi
-            uninstall_control_script
-            ;;
-        *)
-            log_error "Unknown command: $COMMAND"
-            show_usage
-            exit 1
-            ;;
+    setup)
+        CURRENT_COMMAND="setup"
+        check_core_requirements
+        bootstrap_installation
+        ;;
+    start)
+        CURRENT_COMMAND="start"
+        check_core_requirements
+        ensure_config_loaded
+        start_containers
+        ;;
+    stop)
+        CURRENT_COMMAND="stop"
+        check_core_requirements
+        ensure_config_loaded
+        stop_containers
+        ;;
+    restart)
+        CURRENT_COMMAND="restart"
+        check_core_requirements
+        ensure_config_loaded
+        restart_containers
+        ;;
+    renew)
+        CURRENT_COMMAND="renew"
+        check_core_requirements
+        ensure_config_loaded
+        renew_certificate
+        ;;
+    issue-cert)
+        CURRENT_COMMAND="issue-cert"
+        local _cli_cert_mode="$CERT_MODE" _cli_domain="$DOMAIN"
+        check_core_requirements
+        ensure_config_loaded
+        [[ -n "$CLI_CERT_MODE_SET" ]] && CERT_MODE="$_cli_cert_mode"
+        [[ "$domain_option_set" == "1" || -n "$CLI_IP_CERT_SET" ]] && DOMAIN="$_cli_domain"
+        [[ "$CERT_MODE" != "selfsigned" ]] || require_command openssl
+        prepare_effective_settings
+        issue_certificate
+        ;;
+    status)
+        CURRENT_COMMAND="status"
+        show_status
+        ;;
+    service-install)
+        CURRENT_COMMAND="service-install"
+        if [[ "$(id -u)" -ne 0 ]]; then
+            maybe_escalate_privileges "${original_args[@]}"
+        fi
+        ensure_config_loaded
+        install_renewal_timer
+        ;;
+    service-remove)
+        CURRENT_COMMAND="service-remove"
+        if [[ "$(id -u)" -ne 0 ]]; then
+            maybe_escalate_privileges "${original_args[@]}"
+        fi
+        ensure_config_loaded
+        remove_renewal_timer
+        ;;
+    update)
+        CURRENT_COMMAND="update"
+        check_core_requirements
+        ensure_config_loaded
+        update_containers
+        ;;
+    cleanup)
+        CURRENT_COMMAND="cleanup"
+        check_core_requirements
+        cleanup_docker_artifacts
+        ;;
+    cleanup-all)
+        CURRENT_COMMAND="cleanup-all"
+        check_core_requirements
+        cleanup_docker_artifacts 1
+        ;;
+    uninstall)
+        CURRENT_COMMAND="uninstall"
+        if [[ "$(id -u)" -ne 0 ]]; then
+            maybe_escalate_privileges "${original_args[@]}"
+        fi
+        uninstall_control_script
+        ;;
+    *)
+        log_error "Unknown command: $COMMAND"
+        show_usage
+        exit 1
+        ;;
     esac
 }

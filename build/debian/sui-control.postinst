@@ -32,4 +32,7 @@ case "$1" in
 
 MSG
         ;;
+    *)
+        exit 0
+        ;;
 esac

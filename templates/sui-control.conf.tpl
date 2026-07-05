@@ -15,3 +15,9 @@ sui_image=${SUI_IMAGE}
 curl_test_image=${CURL_TEST_IMAGE}
 container_stamp=${CONTAINER_STAMP}
 acme_image=${ACME_IMAGE}
+
+# --- Internal paths (set by installer; do not edit) ---
+package_dir=${PACKAGE_DIR}
+runtime_acme_dir=${RUNTIME_ACME_DIR}
+runtime_cert_dir=${RUNTIME_CERT_DIR}
+runtime_data_dir=${RUNTIME_DATA_DIR}

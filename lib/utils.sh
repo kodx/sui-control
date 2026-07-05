@@ -18,7 +18,7 @@ resolve_layout() {
     RUNTIME_BIN_DIR="$RUNTIME_DIR/bin"
     RUNTIME_SYSTEMD_DIR="$RUNTIME_DIR/systemd"
     RUNTIME_DATA_DIR="$RUNTIME_DIR/db"
-    RUNTIME_CERT_DIR="$RUNTIME_DIR/cert"
+    RUNTIME_CERT_DIR="$CONFIG_DIR/cert"
     RUNTIME_ACME_DIR="$RUNTIME_DIR/acme"
 }
 
@@ -100,7 +100,12 @@ require_command() {
 }
 
 is_ipv4() {
-    [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] && return 0 || return 1
+    local s="$1" octet
+    [[ "$s" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+    for octet in ${s//./ }; do
+        ((octet <= 255)) || return 1
+    done
+    return 0
 }
 
 is_ipv6() {
@@ -182,6 +187,10 @@ assign_config_value() {
         curl_test_image)     CURL_TEST_IMAGE="$value" ;;
         acme_image)          ACME_IMAGE="$value" ;;
         container_stamp)     CONTAINER_STAMP="$value" ;;
+        package_dir)         PACKAGE_DIR="$value" ;;
+        runtime_acme_dir)    RUNTIME_ACME_DIR="$value" ;;
+        runtime_cert_dir)    RUNTIME_CERT_DIR="$value" ;;
+        runtime_data_dir)    RUNTIME_DATA_DIR="$value" ;;
         *) die "Unsupported config key in $CONFIG_FILE_NAME: $key" ;;
     esac
 }
@@ -193,6 +202,15 @@ ensure_file_ownership() {
     [[ "$(id -u)" -eq 0 ]] || return 0
     log_info "Setting ownership of runtime files to $SUI_CONTROL_USER:$SUI_CONTROL_USER"
     chown -R "$SUI_CONTROL_USER:$SUI_CONTROL_USER" "$@" 2>/dev/null || true
+    if [[ -d "$RUNTIME_CERT_DIR" ]]; then
+        local _cert_group="$SUI_CONTROL_USER"
+        if [[ "$OS_ID" == @(debian|ubuntu) ]] && getent group ssl-cert &>/dev/null; then
+            _cert_group="ssl-cert"
+        fi
+        chown -R "$SUI_CONTROL_USER:$_cert_group" "$RUNTIME_CERT_DIR" 2>/dev/null || true
+        chmod -R g+rX "$RUNTIME_CERT_DIR" 2>/dev/null || true
+        chmod -R o-rwx "$RUNTIME_CERT_DIR" 2>/dev/null || true
+    fi
 }
 
 parse_config_file() {

@@ -6,10 +6,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Rebuild the monolithic installer first
-"$SCRIPT_DIR/build.sh"
-
 cd "$PROJECT_DIR"
-dpkg-buildpackage -us -uc
+ln -sf build/debian debian
+dpkg-buildpackage -us -uc -b
+deb_version="$(dpkg-parsechangelog -S Version)"
+rm -f debian
 
-echo "Debian package built. Output in $(dirname "$PROJECT_DIR")"
+echo "Debian package built: sui-control_${deb_version}_all.deb"
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+    echo "version=$deb_version" >> "$GITHUB_OUTPUT"
+fi
