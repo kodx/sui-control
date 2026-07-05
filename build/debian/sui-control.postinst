@@ -9,6 +9,10 @@ case "$1" in
             adduser --system --no-create-home --shell /usr/sbin/nologin sui-control
         fi
 
+        if ! getent group sui-control >/dev/null; then
+            addgroup --system sui-control
+        fi
+
         mkdir -p /etc/sui-control \
             /var/lib/sui-control/bin \
             /var/lib/sui-control/db \

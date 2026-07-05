@@ -30,4 +30,6 @@ case "$1" in
             rm -f /etc/dinit.d/sui-control
         }
         ;;
+    *) exit 0 ;;
 esac
+:

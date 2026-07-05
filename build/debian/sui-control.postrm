@@ -11,4 +11,5 @@ case "$1" in
         fi
         rm -rf /etc/sui-control /var/lib/sui-control /usr/lib/sui-control
         ;;
+    *) exit 0 ;;
 esac
