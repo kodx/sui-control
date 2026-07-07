@@ -7,7 +7,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 OUTPUT="$PROJECT_DIR/sui-control-install.sh"
 
-if tag="$(git -C "$PROJECT_DIR" describe --tags --match 'v*' --abbrev=0 2>/dev/null || true)"; then
+tag="$(git -C "$PROJECT_DIR" describe --tags --match 'v*' --abbrev=0 2>/dev/null)" || true
+if [[ -n "$tag" ]]; then
     VERSION="${tag#v}"
 elif [[ -f "$PROJECT_DIR/VERSION" ]]; then
     VERSION="$(cat "$PROJECT_DIR/VERSION")"
