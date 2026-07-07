@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # .editorconfig hint: indent_style = space, indent_size = 4
 # SPDX-License-Identifier: GPL-3.0-or-later
-set -euo pipefail
+set -Eeuo pipefail
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
 

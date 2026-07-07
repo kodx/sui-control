@@ -186,19 +186,126 @@ _randomize_if_default() {
 }
 
 # ----------------------------------------------------------------------
-# Interactive install dialog
+# Interactive config menu
 # ----------------------------------------------------------------------
-prompt_with_default() {
-    local prompt="$1"
-    local default="$2"
-    local value
-    if [[ -n "$default" ]]; then
-        read -r -p "$prompt [$default]: " value || true
-        printf '%s\n' "${value:-$default}"
-    else
-        read -r -p "$prompt: " value || true
-        printf '%s\n' "$value"
+run_interactive_config_menu() {
+    local cert_mode domain panel_port sub_port panel_path sub_path tz choice ans
+
+    cert_mode="selfsigned"
+    domain=""
+    tz="${TZ:-}"
+    while true; do
+        panel_port=$(generate_random_port 1024 65535)
+        check_tcp_port_free "$panel_port" && break
+    done
+    while true; do
+        sub_port=$(generate_random_port 1024 65535)
+        [[ "$sub_port" -ne "$panel_port" ]] && check_tcp_port_free "$sub_port" && break
+    done
+    panel_path="${SUI_PANEL_PATH:-panel}"
+    sub_path="${SUI_SUBSCRIPTION_PATH:-sub}"
+
+    while true; do
+        echo
+        echo "sui-control configuration"
+        echo "========================="
+        echo " 1) Certificate mode    $cert_mode"
+        echo " 2) Domain/IP           ${domain:-<none>}"
+        echo " 3) Panel port          $panel_port"
+        echo " 4) Subscription port   $sub_port"
+        echo " 5) Panel path          $panel_path"
+        echo " 6) Subscription path   $sub_path"
+        echo " 7) Timezone            ${tz:-<none>}"
+        echo " a) Accept and continue"
+        echo " q) Quit without saving"
+        echo
+        read -r -p "Select option: " choice
+        case "$choice" in
+            1)
+                echo "Certificate mode:"
+                echo "  1) selfsigned"
+                echo "  2) acme"
+                read -r -p "Select [1]: " ans
+                case "${ans:-1}" in
+                    1) cert_mode="selfsigned"; domain="" ;;
+                    2) cert_mode="acme"
+                       read -r -p "Domain or IP for ACME: " domain ;;
+                    *) echo "Invalid selection." ;;
+                esac
+                ;;
+            2)
+                if [[ "$cert_mode" == "acme" ]]; then
+                    read -r -p "Domain or IP for ACME: " domain
+                else
+                    echo "Domain is only used in acme mode. Change certificate mode first."
+                fi
+                ;;
+            3)
+                read -r -p "Panel port [$panel_port]: " ans
+                panel_port="${ans:-$panel_port}"
+                validate_port "Panel port" "$panel_port" || { echo "Invalid port"; continue; }
+                ;;
+            4)
+                read -r -p "Subscription port [$sub_port]: " ans
+                sub_port="${ans:-$sub_port}"
+                validate_port "Subscription port" "$sub_port" || { echo "Invalid port"; continue; }
+                ;;
+            5)
+                read -r -p "Panel path [$panel_path]: " ans
+                panel_path="${ans:-$panel_path}"
+                validate_url_path_segment "Panel path" "$panel_path" || { echo "Invalid path"; continue; }
+                ;;
+            6)
+                read -r -p "Subscription path [$sub_path]: " ans
+                sub_path="${ans:-$sub_path}"
+                validate_url_path_segment "Subscription path" "$sub_path" || { echo "Invalid path"; continue; }
+                ;;
+            7)
+                read -r -p "Timezone [$tz]: " ans
+                tz="${ans:-$tz}"
+                ;;
+            a|A)
+                if [[ "$cert_mode" == "acme" && -z "$domain" ]]; then
+                    echo "Domain/IP is required for acme mode."
+                    continue
+                fi
+                break
+                ;;
+            q|Q)
+                echo "Aborted."
+                exit 0
+                ;;
+            *)
+                echo "Invalid option: $choice"
+                ;;
+        esac
+    done
+
+    mkdir -p "$CONFIG_DIR"
+    cat > "$CONFIG_DIR/$CONFIG_FILE_NAME" <<EOF
+# sui-control configuration
+cert_mode=$cert_mode
+panel_port=$panel_port
+subscription_port=$sub_port
+panel_path=$panel_path
+subscription_path=$sub_path
+EOF
+    if [[ -n "$domain" ]]; then
+        echo "domain=$domain" >> "$CONFIG_DIR/$CONFIG_FILE_NAME"
     fi
+    if [[ -n "$tz" ]]; then
+        echo "tz=$tz" >> "$CONFIG_DIR/$CONFIG_FILE_NAME"
+    fi
+
+    CERT_MODE="$cert_mode"
+    DOMAIN="${domain:-}"
+    TZ="$tz"
+    SUI_PANEL_PORT="$panel_port"
+    SUI_SUBSCRIPTION_PORT="$sub_port"
+    SUI_PANEL_PATH="$panel_path"
+    SUI_SUBSCRIPTION_PATH="$sub_path"
+
+    echo "Created $CONFIG_DIR/$CONFIG_FILE_NAME"
 }
 
 prompt_yes_no() {
@@ -216,104 +323,6 @@ prompt_yes_no() {
             y|Y|yes|YES) return 0 ;;
             n|N|no|NO)   return 1 ;;
             *) echo 'Enter y or n.' ;;
-        esac
-    done
-}
-
-prompt_certificate_mode() {
-    local current="$1"
-    local default_choice="1"
-    local answer
-    [[ "$current" == "acme" ]] && default_choice="2"
-    while true; do
-        printf '%s\n' 'Certificate mode:' >&2
-        printf '%s\n' '  1) selfsigned - create a local self-signed certificate and start s-ui immediately.' >&2
-        printf '%s\n' '  2) acme       - obtain a public certificate via ACME.' >&2
-        printf 'Choose certificate mode [%s]: ' "$default_choice" >&2
-        read -r answer || true
-        answer="${answer:-$default_choice}"
-        case "$answer" in
-            1) printf '%s\n' 'selfsigned'; return ;;
-            2) printf '%s\n' 'acme';       return ;;
-            *) printf '%s\n' 'Enter 1 or 2.' >&2 ;;
-        esac
-    done
-}
-
-prompt_acme_identifier() {
-    if [[ "$CERT_MODE" == "acme" ]]; then
-        DOMAIN="$(prompt_with_default 'Domain or IP for ACME (domain ~90 days, IP ~6 days)' "${DOMAIN:-panel.example.com}")"
-        if is_ip "$DOMAIN"; then
-            is_ipv4 "$DOMAIN" || is_ipv6 "$DOMAIN" || die "Invalid IP address: $DOMAIN"
-        else
-            validate_domain "$DOMAIN"
-        fi
-    else
-        DOMAIN="localhost"
-    fi
-}
-
-show_install_defaults() {
-    echo 'Current installation values:'
-    echo "  1. Certificate mode   : $CERT_MODE"
-    echo "  2. ACME identifier    : ${DOMAIN:-(empty)}"
-    echo "  3. Time zone          : ${TZ:-(empty)}"
-    echo "  4. Panel port         : $SUI_PANEL_PORT"
-    echo "  5. Subscription port  : $SUI_SUBSCRIPTION_PORT"
-    echo "  6. Panel path         : /$SUI_PANEL_PATH/"
-    echo "  7. Subscription path  : /$SUI_SUBSCRIPTION_PATH/"
-}
-
-edit_install_option() {
-    local option="$1"
-    case "$option" in
-        1) CERT_MODE="$(prompt_certificate_mode "$CERT_MODE")"
-           [[ "$CERT_MODE" == "selfsigned" ]] && DOMAIN='' ;;
-        2) [[ "$CERT_MODE" == "acme" ]] && prompt_acme_identifier || echo 'Domain is used only in ACME mode.' ;;
-        3) TZ="$(prompt_with_default 'Time zone (optional)' "$TZ")" ;;
-        4) SUI_PANEL_PORT="$(prompt_with_default 'Panel port' "$SUI_PANEL_PORT")" ;;
-        5) SUI_SUBSCRIPTION_PORT="$(prompt_with_default 'Subscription port' "$SUI_SUBSCRIPTION_PORT")" ;;
-        6) SUI_PANEL_PATH="$(prompt_with_default 'Panel path' "$SUI_PANEL_PATH")" ;;
-        7) SUI_SUBSCRIPTION_PATH="$(prompt_with_default 'Subscription path' "$SUI_SUBSCRIPTION_PATH")" ;;
-        *) return 1 ;;
-    esac
-}
-
-run_interactive_installation_dialog() {
-    local action
-    while true; do
-        echo
-        show_install_defaults
-        echo
-        echo '  1) Change certificate mode'
-        echo '  2) Change ACME identifier'
-        echo '  3) Change time zone'
-        echo '  4) Change panel port'
-        echo '  5) Change subscription port'
-        echo '  6) Change panel path'
-        echo '  7) Change subscription path'
-        echo '  8) Continue installation'
-        read -r -p 'Choose action [8]: ' action || true
-        action="${action:-8}"
-        case "$action" in
-            1|2|3|4|5|6|7) edit_install_option "$action" ;;
-            8)
-                if [[ "$CERT_MODE" == "acme" ]]; then
-                    if [[ -z "$DOMAIN" ]]; then
-                        prompt_acme_identifier
-                    else
-                        if is_ip "$DOMAIN"; then
-                            is_ipv4 "$DOMAIN" || is_ipv6 "$DOMAIN" || die "Invalid IP address: $DOMAIN"
-                        else
-                            validate_domain "$DOMAIN"
-                        fi
-                    fi
-                else
-                    DOMAIN='localhost'
-                fi
-                break
-                ;;
-            *) echo 'Enter 1..8.' ;;
         esac
     done
 }
@@ -410,7 +419,7 @@ _update_config_stamp() {
 }
 start_containers() {
     local port new_stamp
-    local ports_args=()
+    local ports_args=() docker_opts=()
 
     while IFS= read -r port; do
         [[ -z "$port" ]] && continue
@@ -436,12 +445,12 @@ start_containers() {
         return 0
     fi
 
-    docker network inspect "$DOCKER_NETWORK" >/dev/null 2>&1 || docker network create "$DOCKER_NETWORK" >/dev/null
+    docker network inspect "$DOCKER_NETWORK" >/dev/null 2>&1 || { docker network create "$DOCKER_NETWORK" >/dev/null || die "Failed to create Docker network: $DOCKER_NETWORK"; }
     docker stop "$CONTAINER_NAME" 2>/dev/null || true
     docker rm "$CONTAINER_NAME" 2>/dev/null || true
-
-    docker run -d --restart=unless-stopped --network "$DOCKER_NETWORK" --name "$CONTAINER_NAME" "${ports_args[@]}" ${TZ:+-e TZ="$TZ"} -v "$RUNTIME_DATA_DIR:/app/db" -v "$RUNTIME_CERT_DIR:/certs:ro" "$SUI_IMAGE" >/dev/null
-
+    docker_opts=("${ports_args[@]}")
+    [[ -n "$TZ" ]] && docker_opts+=(-e "TZ=$TZ")
+    docker run -d --restart=unless-stopped --network "$DOCKER_NETWORK" --name "$CONTAINER_NAME" "${docker_opts[@]}" -v "$RUNTIME_DATA_DIR:/app/db" -v "$RUNTIME_CERT_DIR:/certs:ro" "$SUI_IMAGE" >/dev/null
     _update_config_stamp "$new_stamp"
     CONTAINER_STAMP="$new_stamp"
 }
@@ -543,7 +552,7 @@ _remove_timer_systemd() {
         systemctl stop "$SYSTEMD_RENEW_SERVICE_NAME"            >/dev/null 2>&1 || true
     fi
     rm -f "$control_link" "$renew_svc_link" "$timer_link"
-if command_exists systemctl; then systemctl daemon-reload || true; fi
+    if command_exists systemctl; then systemctl daemon-reload || true; fi
 }
 
 # ----------------------------------------------------------------------
@@ -574,7 +583,6 @@ start() {
 
 stop() {
     ebegin "Stopping s-ui"
-    start-stop-daemon --stop --user $SUI_CONTROL_USER --exec $PACKAGE_DIR/sui-control.sh
     $PACKAGE_DIR/sui-control.sh stop
     eend \$?
 }
@@ -634,11 +642,12 @@ S6_RUN
 
     _create_cron_job
     mkdir -p /etc/s6
-    ln -sfn "$S6_SERVICE_DIR" "/etc/s6/service" 2>/dev/null || true
+    ln -sfn "$S6_SERVICE_DIR" "/etc/s6/service/sui-control" 2>/dev/null || true
 }
 
 _remove_timer_s6() {
     rm -rf "$S6_SERVICE_DIR"
+    rm -f "/etc/s6/service/sui-control"
     _remove_cron_job
 }
 
@@ -671,6 +680,10 @@ _remove_timer_dinit() {
 # ----------------------------------------------------------------------
 # Cron helper
 # ----------------------------------------------------------------------
+# NOTE: supports only simple OnCalendar patterns. Complex expressions
+# (ranges like Mon..Fri, wildcards like *-*-*) may produce incorrect cron
+# output. Test your pattern if using custom --timer-on-calendar.
+
 _systemd_oncalendar_to_cron() {
     local cal="$1" day_part time_part hour min d nums days
     case "$cal" in
@@ -882,7 +895,7 @@ bootstrap_installation() {
     _randomize_if_default SUI_PANEL_PATH        "$DEFAULT_SUI_PANEL_PATH"        CLI_PANEL_PATH_SET        ""               generate_random_path_segment
     _randomize_if_default SUI_SUBSCRIPTION_PATH "$DEFAULT_SUI_SUBSCRIPTION_PATH" CLI_SUBSCRIPTION_PATH_SET "$SUI_PANEL_PATH" generate_random_path_segment
 
-    [[ "$BATCH_INSTALL" != "1" ]] && run_interactive_installation_dialog
+    [[ "$BATCH_INSTALL" != "1" ]] && run_interactive_config_menu
 
     [[ -n "$INSTALL_GENERATED_USERNAME" ]] || INSTALL_GENERATED_USERNAME="$(generate_random_alnum 20)"
     [[ -n "$INSTALL_GENERATED_PASSWORD" ]] || INSTALL_GENERATED_PASSWORD="$(generate_random_alnum 20)"

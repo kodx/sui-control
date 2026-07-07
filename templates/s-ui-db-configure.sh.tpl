@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 # shellcheck disable=SC2154
-set -euo pipefail
+set -Eeuo pipefail
 
 . "$PACKAGE_DIR/lib/constants.sh"
 . "$PACKAGE_DIR/lib/utils.sh"

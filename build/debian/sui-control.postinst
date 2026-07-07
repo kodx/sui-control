@@ -22,6 +22,8 @@ case "$1" in
 
         chown -R sui-control:sui-control /etc/sui-control /var/lib/sui-control
 
+        chmod g+w /etc/sui-control
+
         if ! groups sui-control >/dev/null 2>&1 | grep -qw docker; then
             adduser sui-control docker >/dev/null 2>&1 || true
         fi
@@ -30,11 +32,14 @@ case "$1" in
 
   SUI-Control installed.
 
-  Run 'sudo sui-control.sh setup' to configure your deployment.
+  Add yourself to the sui-control group to manage without sudo:
+    sudo gpasswd -a $USER sui-control
+
+  Then run 'sui-control.sh setup' to configure your deployment.
   This will create runtime directories, configure s-ui, and
   install the service for auto-start at boot.
-
 MSG
+
         ;;
     *)
         exit 0

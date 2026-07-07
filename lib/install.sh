@@ -137,7 +137,7 @@ install_control_script() {
  ___) | |_| || |   | |__| (_) | | | | |_| | | (_) | |
 |____/ \___/|___|   \____\___/|_| |_|\__|_|  \___/|_|
 EOF_BANNER
-        run_interactive_installation_dialog
+        run_interactive_config_menu
     fi
 
     [[ -n "$INSTALL_GENERATED_USERNAME" ]] || INSTALL_GENERATED_USERNAME="$(generate_random_alnum 20)"

@@ -1,20 +1,17 @@
 #!/usr/bin/env bash
 # .editorconfig hint: indent_style = space, indent_size = 4
 # SPDX-License-Identifier: GPL-3.0-or-later
-set -euo pipefail
+set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 OUTPUT="$PROJECT_DIR/sui-control-install.sh"
 
-if [[ ! -f "$PROJECT_DIR/VERSION" ]]; then
-    if tag="$(git -C "$PROJECT_DIR" describe --tags --match 'v*' --abbrev=0 2>/dev/null)"; then
-        echo "${tag#v}" > "$PROJECT_DIR/VERSION"
-    else
-        echo '0.0.0-dev' > "$PROJECT_DIR/VERSION"
-    fi
+if tag="$(git -C "$PROJECT_DIR" describe --tags --match 'v*' --abbrev=0 2>/dev/null)"; then
+    VERSION="${tag#v}"
+else
+    VERSION='0.0.0-dev'
 fi
-VERSION="$(cat "$PROJECT_DIR/VERSION")"
 
 # Validate VERSION is semver
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]] \

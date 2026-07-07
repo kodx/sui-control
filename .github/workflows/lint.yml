@@ -23,4 +23,4 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
 
       - name: Run shellcheck
-        run: shellcheck .githooks/pre-commit lib/*.sh sui-control.sh build/*.sh templates/*.sh.tpl
+        run: shellcheck .githooks/pre-commit lib/*.sh sui-control.sh build/*.sh templates/*.sh.tpl build/debian/sui-control.postinst build/debian/sui-control.prerm build/debian/sui-control.postrm

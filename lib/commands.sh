@@ -195,6 +195,14 @@ uninstall_control_script() {
     if [[ -z "${RUNTIME_DIR:-}" || -z "${CONFIG_DIR:-}" ]]; then
         die "Refusing to remove empty RUNTIME_DIR or CONFIG_DIR"
     fi
+    case "$RUNTIME_DIR" in
+        /var/lib/sui-control|/opt/s-ui) ;;
+        *) die "Refusing to remove unexpected RUNTIME_DIR: $RUNTIME_DIR" ;;
+    esac
+    case "$CONFIG_DIR" in
+        /etc/sui-control|/opt/s-ui) ;;
+        *) die "Refusing to remove unexpected CONFIG_DIR: $CONFIG_DIR" ;;
+    esac
     rm -rf -- "$RUNTIME_DIR" "$CONFIG_DIR"
     remove_renewal_timer
     log_info "Installation data removed"
@@ -312,6 +320,9 @@ dispatch_command() {
     case "$COMMAND" in
     setup)
         CURRENT_COMMAND="setup"
+        if [[ "$(id -u)" -ne 0 ]]; then
+            maybe_escalate_privileges "${original_args[@]}"
+        fi
         check_core_requirements
         bootstrap_installation
         ;;

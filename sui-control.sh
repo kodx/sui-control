@@ -14,46 +14,13 @@ source "$SCRIPT_DIR/lib/utils.sh"
 PACKAGE_DIR="$SCRIPT_DIR"
 resolve_layout
 
-# Dev config overrides (optional, for local testing)
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/actions.sh"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/commands.sh"
 
 init_config() {
-    local cert_mode domain panel_port sub_port ans
-
-    if [[ -f "$CONFIG_DIR/$CONFIG_FILE_NAME" ]]; then
-        read -r -p "$CONFIG_DIR/$CONFIG_FILE_NAME already exists. Overwrite? [y/N] " ans
-        [[ "$ans" =~ ^[yY] ]] || { echo "Aborted."; exit 0; }
-    fi
-
-    while true; do
-        read -r -p "Certificate mode (selfsigned/acme) [selfsigned]: " cert_mode
-        cert_mode="${cert_mode:-selfsigned}"
-        case "$cert_mode" in selfsigned|acme) break ;; *) echo "Enter selfsigned or acme." ;; esac
-    done
-
-    domain=""
-    if [[ "$cert_mode" == "acme" ]]; then
-        read -r -p "Domain or IP for ACME (domain ~90 days, IP ~6 days): " domain
-    fi
-
-    read -r -p "Panel port [2095]: " panel_port
-    panel_port="${panel_port:-2095}"
-
-    read -r -p "Subscription port [2096]: " sub_port
-    sub_port="${sub_port:-2096}"
-
-    mkdir -p "$CONFIG_DIR"
-    cat > "$CONFIG_DIR/$CONFIG_FILE_NAME" <<EOF
-# sui-control configuration
-cert_mode=$cert_mode
-panel_port=$panel_port
-subscription_port=$sub_port
-EOF
-
-    if [[ -n "$domain" ]]; then
-        echo "domain=$domain" >> "$CONFIG_DIR/$CONFIG_FILE_NAME"
-    fi
-
-    echo "Created $CONFIG_DIR/$CONFIG_FILE_NAME"
+    run_interactive_config_menu
 }
 
 prompt_create_config() {
@@ -62,7 +29,7 @@ prompt_create_config() {
     echo "  (You can also run './sui-control.sh init-config' later)"
     read -r -p "Create config.conf now? [y/N] " ans
     if [[ "$ans" =~ ^[yY] ]]; then
-        init_config
+        run_interactive_config_menu
     else
         mkdir -p "$CONFIG_DIR"
         cat > "$CONFIG_DIR/$CONFIG_FILE_NAME" <<EOF_CONFIG
@@ -81,15 +48,11 @@ case "${1:-}" in
         exit 0
         ;;
     help|-h|--help)
+        show_usage
+        exit 0
         ;;
     *)
         [[ -f "$CONFIG_DIR/$CONFIG_FILE_NAME" ]] || prompt_create_config
+        dispatch_command "$@"
         ;;
 esac
-
-# shellcheck disable=SC1091
-source "$SCRIPT_DIR/lib/actions.sh"
-# shellcheck disable=SC1091
-source "$SCRIPT_DIR/lib/commands.sh"
-
-dispatch_command "$@"
