@@ -24,22 +24,9 @@ init_config() {
 }
 
 prompt_create_config() {
-    local ans
-    echo "$CONFIG_DIR/$CONFIG_FILE_NAME not found — create one with your preferred defaults?"
-    echo "  (You can also run './sui-control.sh init-config' later)"
-    read -r -p "Create config.conf now? [y/N] " ans
-    if [[ "$ans" =~ ^[yY] ]]; then
-        run_interactive_config_menu
-    else
-        mkdir -p "$CONFIG_DIR"
-        cat > "$CONFIG_DIR/$CONFIG_FILE_NAME" <<EOF_CONFIG
-# sui-control configuration — auto-generated defaults
-cert_mode=$DEFAULT_CERT_MODE
-panel_port=$DEFAULT_SUI_PANEL_PORT
-subscription_port=$DEFAULT_SUI_SUBSCRIPTION_PORT
-EOF_CONFIG
-        echo "Using built-in defaults."
-    fi
+    echo "$CONFIG_DIR/$CONFIG_FILE_NAME not found."
+    echo "Run '$0 setup' to configure your deployment."
+    exit 1
 }
 
 case "${1:-}" in

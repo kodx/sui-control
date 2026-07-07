@@ -32,10 +32,10 @@ case "$1" in
 
   SUI-Control installed.
 
-  Add yourself to the sui-control group to manage without sudo:
-    sudo gpasswd -a $USER sui-control
+  Add yourself (or another system user) to the sui-control group to manage without sudo:
+    sudo gpasswd -a ${SUDO_USER:-your-username} sui-control
 
-  Then run 'sui-control.sh setup' to configure your deployment.
+  Then run 'sui-control setup' to configure your deployment.
   This will create runtime directories, configure s-ui, and
   install the service for auto-start at boot.
 MSG

@@ -321,7 +321,9 @@ dispatch_command() {
     setup)
         CURRENT_COMMAND="setup"
         if [[ "$(id -u)" -ne 0 ]]; then
-            maybe_escalate_privileges "${original_args[@]}"
+            if ! id "$SUI_CONTROL_USER" &>/dev/null || [[ ! -d "$CONFIG_DIR" ]]; then
+                maybe_escalate_privileges "${original_args[@]}"
+            fi
         fi
         check_core_requirements
         bootstrap_installation

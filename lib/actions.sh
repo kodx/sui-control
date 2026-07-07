@@ -24,35 +24,35 @@ require_option_value() {
 validate_domain() {
     local domain="$1"
     local label
-    [[ -n "$domain" ]]                          || die "Domain must not be empty"
-    [[ ${#domain} -le 253 ]]                    || die "Domain is too long (max 253 chars): $domain"
-    [[ "$domain" =~ ^[A-Za-z0-9.-]+$ ]]         || die "Domain contains unsupported characters: $domain"
-    [[ "$domain" != .* ]]                        || die "Domain must not start with a dot: $domain"
-    [[ "$domain" != *..* ]]                      || die "Domain must not contain consecutive dots: $domain"
-    [[ "$domain" == *.* ]]                       || die "Domain must contain at least one dot: $domain"
-    IFS='.' read -r -a labels <<< "$domain"
+    [[ -n "$domain" ]] || die "Domain must not be empty"
+    [[ ${#domain} -le 253 ]] || die "Domain is too long (max 253 chars): $domain"
+    [[ "$domain" =~ ^[A-Za-z0-9.-]+$ ]] || die "Domain contains unsupported characters: $domain"
+    [[ "$domain" != .* ]] || die "Domain must not start with a dot: $domain"
+    [[ "$domain" != *..* ]] || die "Domain must not contain consecutive dots: $domain"
+    [[ "$domain" == *.* ]] || die "Domain must contain at least one dot: $domain"
+    IFS='.' read -r -a labels <<<"$domain"
     for label in "${labels[@]}"; do
-        [[ -n "$label" ]]       || die "Domain has an empty label: $domain"
-        [[ ${#label} -le 63 ]]  || die "Domain label is too long (max 63 chars): $label"
-        [[ "$label" != -* ]]    || die "Domain label must not start with a hyphen: $label"
-        [[ "$label" != *- ]]    || die "Domain label must not end with a hyphen: $label"
+        [[ -n "$label" ]] || die "Domain has an empty label: $domain"
+        [[ ${#label} -le 63 ]] || die "Domain label is too long (max 63 chars): $label"
+        [[ "$label" != -* ]] || die "Domain label must not start with a hyphen: $label"
+        [[ "$label" != *- ]] || die "Domain label must not end with a hyphen: $label"
     done
 }
 
 validate_port() {
     local label="$1" port="$2"
     [[ "$port" =~ ^[0-9]+$ ]] || die "$label must be a number: $port"
-    (( port >= 1 && port <= 65535 )) || die "$label must be between 1 and 65535: $port"
+    ((port >= 1 && port <= 65535)) || die "$label must be between 1 and 65535: $port"
 }
 
 validate_url_path_segment() {
     local label="$1" value="$2"
-    [[ -n "$value" ]]             || die "$label must not be empty"
-    [[ "$value" != /* ]]          || die "$label must not start with slash: $value"
-    [[ "$value" != */ ]]          || die "$label must not end with slash: $value"
-    [[ "$value" != *"//"* ]]      || die "$label must not contain double slash: $value"
-    [[ "$value" =~ ^[A-Za-z0-9._~-]+(/[A-Za-z0-9._~-]+)*$ ]] \
-        || die "$label contains unsupported characters: $value"
+    [[ -n "$value" ]] || die "$label must not be empty"
+    [[ "$value" != /* ]] || die "$label must not start with slash: $value"
+    [[ "$value" != */ ]] || die "$label must not end with slash: $value"
+    [[ "$value" != *"//"* ]] || die "$label must not contain double slash: $value"
+    [[ "$value" =~ ^[A-Za-z0-9._~-]+(/[A-Za-z0-9._~-]+)*$ ]] ||
+        die "$label contains unsupported characters: $value"
 }
 
 # ----------------------------------------------------------------------
@@ -60,11 +60,26 @@ validate_url_path_segment() {
 # ----------------------------------------------------------------------
 detect_init_system() {
     [[ "$INIT_SYSTEM" != "auto" ]] && return
-    if command_exists systemctl;   then INIT_SYSTEM="systemd"; return; fi
-    if command_exists rc-update;   then INIT_SYSTEM="openrc";  return; fi
-    if command_exists runsvdir;    then INIT_SYSTEM="runit";   return; fi
-    if command_exists s6-svscan;   then INIT_SYSTEM="s6";      return; fi
-    if command_exists dinitctl;    then INIT_SYSTEM="dinit";   return; fi
+    if command_exists systemctl; then
+        INIT_SYSTEM="systemd"
+        return
+    fi
+    if command_exists rc-update; then
+        INIT_SYSTEM="openrc"
+        return
+    fi
+    if command_exists runsvdir; then
+        INIT_SYSTEM="runit"
+        return
+    fi
+    if command_exists s6-svscan; then
+        INIT_SYSTEM="s6"
+        return
+    fi
+    if command_exists dinitctl; then
+        INIT_SYSTEM="dinit"
+        return
+    fi
     INIT_SYSTEM="unsupported"
 }
 
@@ -83,17 +98,17 @@ detect_os_id() {
 prepare_effective_settings() {
     detect_os_id
     case "$CERT_MODE" in
-        selfsigned|acme) ;;
-        *) die "Unsupported certificate mode: $CERT_MODE" ;;
+    selfsigned | acme) ;;
+    *) die "Unsupported certificate mode: $CERT_MODE" ;;
     esac
     if [[ "$CERT_MODE" == "acme" ]]; then
         assert_nonempty_value "Timer OnCalendar" "$TIMER_ON_CALENDAR"
         assert_nonempty_value "Timer RandomizedDelaySec" "$TIMER_RANDOM_DELAY"
         if command_exists systemd-analyze; then
-            systemd-analyze calendar "$TIMER_ON_CALENDAR" >/dev/null 2>&1 \
-                || die "Invalid systemd OnCalendar value: $TIMER_ON_CALENDAR"
-            systemd-analyze timespan "$TIMER_RANDOM_DELAY" >/dev/null 2>&1 \
-                || die "Invalid systemd RandomizedDelaySec value: $TIMER_RANDOM_DELAY"
+            systemd-analyze calendar "$TIMER_ON_CALENDAR" >/dev/null 2>&1 ||
+                die "Invalid systemd OnCalendar value: $TIMER_ON_CALENDAR"
+            systemd-analyze timespan "$TIMER_RANDOM_DELAY" >/dev/null 2>&1 ||
+                die "Invalid systemd RandomizedDelaySec value: $TIMER_RANDOM_DELAY"
         fi
         if is_ip "$DOMAIN"; then
             is_ipv4 "$DOMAIN" || is_ipv6 "$DOMAIN" || die "Invalid IP address: $DOMAIN"
@@ -108,15 +123,15 @@ prepare_effective_settings() {
     else
         DOMAIN="localhost"
     fi
-    [[ "$SELF_SIGNED_DAYS" =~ ^[0-9]+$ ]]         || die "self_signed_days must be a positive integer: $SELF_SIGNED_DAYS"
+    [[ "$SELF_SIGNED_DAYS" =~ ^[0-9]+$ ]] || die "self_signed_days must be a positive integer: $SELF_SIGNED_DAYS"
     validate_port "Panel port" "$SUI_PANEL_PORT"
     validate_port "Subscription port" "$SUI_SUBSCRIPTION_PORT"
-    [[ "$SUI_PANEL_PORT" != "$SUI_SUBSCRIPTION_PORT" ]] \
-        || die "Panel port and subscription port must be different"
+    [[ "$SUI_PANEL_PORT" != "$SUI_SUBSCRIPTION_PORT" ]] ||
+        die "Panel port and subscription port must be different"
     validate_url_path_segment "Panel path" "$SUI_PANEL_PATH"
     validate_url_path_segment "Subscription path" "$SUI_SUBSCRIPTION_PATH"
-    [[ "$SUI_PANEL_PATH" != "$SUI_SUBSCRIPTION_PATH" ]] \
-        || die "Panel path and subscription path must be different"
+    [[ "$SUI_PANEL_PATH" != "$SUI_SUBSCRIPTION_PATH" ]] ||
+        die "Panel path and subscription path must be different"
 }
 
 # ----------------------------------------------------------------------
@@ -156,8 +171,8 @@ check_install_requirements() {
     [[ "$CERT_MODE" != "selfsigned" ]] || require_command openssl
     if [[ "$CERT_MODE" == "acme" ]]; then
         detect_init_system
-        [[ "$INIT_SYSTEM" != "unsupported" ]] \
-            || log_warn "No supported init system found; renewal timer will not be auto-activated"
+        [[ "$INIT_SYSTEM" != "unsupported" ]] ||
+            log_warn "No supported init system found; renewal timer will not be auto-activated"
     fi
 }
 
@@ -166,9 +181,9 @@ check_install_requirements() {
 # ----------------------------------------------------------------------
 generate_random_port() {
     local min="$1" max="$2" range num
-    range=$(( max - min + 1 ))
+    range=$((max - min + 1))
     num="$(od -An -N4 -tu4 /dev/urandom | tr -d ' \n')"
-    printf '%s\n' $(( num % range + min ))
+    printf '%s\n' $((num % range + min))
 }
 
 _randomize_if_default() {
@@ -221,68 +236,85 @@ run_interactive_config_menu() {
         echo
         read -r -p "Select option: " choice
         case "$choice" in
+        1)
+            echo "Certificate mode:"
+            echo "  1) selfsigned"
+            echo "  2) acme"
+            read -r -p "Select [1]: " ans
+            case "${ans:-1}" in
             1)
-                echo "Certificate mode:"
-                echo "  1) selfsigned"
-                echo "  2) acme"
-                read -r -p "Select [1]: " ans
-                case "${ans:-1}" in
-                    1) cert_mode="selfsigned"; domain="" ;;
-                    2) cert_mode="acme"
-                       read -r -p "Domain or IP for ACME: " domain ;;
-                    *) echo "Invalid selection." ;;
-                esac
+                cert_mode="selfsigned"
+                domain=""
                 ;;
             2)
-                if [[ "$cert_mode" == "acme" ]]; then
-                    read -r -p "Domain or IP for ACME: " domain
-                else
-                    echo "Domain is only used in acme mode. Change certificate mode first."
-                fi
+                cert_mode="acme"
+                read -r -p "Domain or IP for ACME: " domain
                 ;;
-            3)
-                read -r -p "Panel port [$panel_port]: " ans
-                panel_port="${ans:-$panel_port}"
-                validate_port "Panel port" "$panel_port" || { echo "Invalid port"; continue; }
-                ;;
-            4)
-                read -r -p "Subscription port [$sub_port]: " ans
-                sub_port="${ans:-$sub_port}"
-                validate_port "Subscription port" "$sub_port" || { echo "Invalid port"; continue; }
-                ;;
-            5)
-                read -r -p "Panel path [$panel_path]: " ans
-                panel_path="${ans:-$panel_path}"
-                validate_url_path_segment "Panel path" "$panel_path" || { echo "Invalid path"; continue; }
-                ;;
-            6)
-                read -r -p "Subscription path [$sub_path]: " ans
-                sub_path="${ans:-$sub_path}"
-                validate_url_path_segment "Subscription path" "$sub_path" || { echo "Invalid path"; continue; }
-                ;;
-            7)
-                read -r -p "Timezone [$tz]: " ans
-                tz="${ans:-$tz}"
-                ;;
-            a|A)
-                if [[ "$cert_mode" == "acme" && -z "$domain" ]]; then
-                    echo "Domain/IP is required for acme mode."
-                    continue
-                fi
-                break
-                ;;
-            q|Q)
-                echo "Aborted."
-                exit 0
-                ;;
-            *)
-                echo "Invalid option: $choice"
-                ;;
+            *) echo "Invalid selection." ;;
+            esac
+            ;;
+        2)
+            if [[ "$cert_mode" == "acme" ]]; then
+                read -r -p "Domain or IP for ACME: " domain
+            else
+                echo "Domain is only used in acme mode. Change certificate mode first."
+            fi
+            ;;
+        3)
+            read -r -p "Panel port [$panel_port]: " ans
+            panel_port="${ans:-$panel_port}"
+            validate_port "Panel port" "$panel_port" || {
+                echo "Invalid port"
+                continue
+            }
+            ;;
+        4)
+            read -r -p "Subscription port [$sub_port]: " ans
+            sub_port="${ans:-$sub_port}"
+            validate_port "Subscription port" "$sub_port" || {
+                echo "Invalid port"
+                continue
+            }
+            ;;
+        5)
+            read -r -p "Panel path [$panel_path]: " ans
+            panel_path="${ans:-$panel_path}"
+            validate_url_path_segment "Panel path" "$panel_path" || {
+                echo "Invalid path"
+                continue
+            }
+            ;;
+        6)
+            read -r -p "Subscription path [$sub_path]: " ans
+            sub_path="${ans:-$sub_path}"
+            validate_url_path_segment "Subscription path" "$sub_path" || {
+                echo "Invalid path"
+                continue
+            }
+            ;;
+        7)
+            read -r -p "Timezone [$tz]: " ans
+            tz="${ans:-$tz}"
+            ;;
+        a | A)
+            if [[ "$cert_mode" == "acme" && -z "$domain" ]]; then
+                echo "Domain/IP is required for acme mode."
+                continue
+            fi
+            break
+            ;;
+        q | Q)
+            echo "Aborted."
+            exit 0
+            ;;
+        *)
+            echo "Invalid option: $choice"
+            ;;
         esac
     done
 
     mkdir -p "$CONFIG_DIR"
-    cat > "$CONFIG_DIR/$CONFIG_FILE_NAME" <<EOF
+    cat >"$CONFIG_DIR/$CONFIG_FILE_NAME" <<EOF
 # sui-control configuration
 cert_mode=$cert_mode
 panel_port=$panel_port
@@ -291,10 +323,10 @@ panel_path=$panel_path
 subscription_path=$sub_path
 EOF
     if [[ -n "$domain" ]]; then
-        echo "domain=$domain" >> "$CONFIG_DIR/$CONFIG_FILE_NAME"
+        echo "domain=$domain" >>"$CONFIG_DIR/$CONFIG_FILE_NAME"
     fi
     if [[ -n "$tz" ]]; then
-        echo "tz=$tz" >> "$CONFIG_DIR/$CONFIG_FILE_NAME"
+        echo "tz=$tz" >>"$CONFIG_DIR/$CONFIG_FILE_NAME"
     fi
 
     CERT_MODE="$cert_mode"
@@ -313,16 +345,16 @@ prompt_yes_no() {
     local default_answer="${2:-n}"
     local answer hint
     case "$default_answer" in
-        y|Y) hint='[Y/n]' ;;
-        *)   hint='[y/N]' ;;
+    y | Y) hint='[Y/n]' ;;
+    *) hint='[y/N]' ;;
     esac
     while true; do
         read -r -p "$prompt $hint: " answer || true
         answer="${answer:-$default_answer}"
         case "$answer" in
-            y|Y|yes|YES) return 0 ;;
-            n|N|no|NO)   return 1 ;;
-            *) echo 'Enter y or n.' ;;
+        y | Y | yes | YES) return 0 ;;
+        n | N | no | NO) return 1 ;;
+        *) echo 'Enter y or n.' ;;
         esac
     done
 }
@@ -340,7 +372,7 @@ generate_self_signed_cert() {
     # shellcheck disable=SC2064
     trap "rm -f '$tmp_conf'" EXIT
     mkdir -p "$cert_root"
-    cat > "$tmp_conf" <<EOF_SSL
+    cat >"$tmp_conf" <<EOF_SSL
 [req]
 distinguished_name=req_distinguished_name
 x509_extensions=v3_req
@@ -359,7 +391,7 @@ DNS.1=$cert_cn
 EOF_SSL
     openssl req -x509 -nodes -newkey rsa:2048 -days "$SELF_SIGNED_DAYS" \
         -keyout "$cert_root/privkey.pem" \
-        -out    "$cert_root/fullchain.pem" \
+        -out "$cert_root/fullchain.pem" \
         -config "$tmp_conf" >/dev/null 2>&1
     chmod 0600 "$cert_root/privkey.pem"
     chmod 0644 "$cert_root/fullchain.pem"
@@ -381,7 +413,10 @@ create_generated_file() {
     log_info "Creating $label at: $path"
     old_umask="$(umask)"
     umask 077
-    "$generator" > "$path" || { umask "$old_umask"; die "Failed to create $label: $path"; }
+    "$generator" >"$path" || {
+        umask "$old_umask"
+        die "Failed to create $label: $path"
+    }
     umask "$old_umask"
     [[ -n "$mode" ]] && chmod "$mode" "$path"
 }
@@ -402,7 +437,7 @@ _compute_container_stamp() {
 
 get_inbound_ports() {
     [[ -n "$INBOUND_PORTS" ]] || return 0
-    tr ',' '\n' <<< "$INBOUND_PORTS" | sort -n
+    tr ',' '\n' <<<"$INBOUND_PORTS" | sort -n
 }
 
 _update_config_stamp() {
@@ -414,7 +449,7 @@ _update_config_stamp() {
     if grep -q '^container_stamp=' "$config_file" 2>/dev/null; then
         sed -i "s/^container_stamp=.*/container_stamp=$escaped_stamp/" "$config_file"
     else
-        echo "container_stamp=$new_stamp" >> "$config_file"
+        echo "container_stamp=$new_stamp" >>"$config_file"
     fi
 }
 start_containers() {
@@ -440,8 +475,8 @@ start_containers() {
 
     new_stamp="$(_compute_container_stamp)"
 
-    if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$CONTAINER_NAME" && 
-       [[ "$CONTAINER_STAMP" == "$new_stamp" ]]; then
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$CONTAINER_NAME" &&
+        [[ "$CONTAINER_STAMP" == "$new_stamp" ]]; then
         return 0
     fi
 
@@ -478,7 +513,7 @@ _install_timer_systemd() {
     mkdir -p "$service_dir"
 
     # Control service (start/stop at boot)
-    cat > "$control_service_file" <<EOF_CONTROL
+    cat >"$control_service_file" <<EOF_CONTROL
 [Unit]
 Description=SUI-Control
 After=docker.service network-online.target
@@ -496,7 +531,7 @@ WantedBy=multi-user.target
 EOF_CONTROL
 
     # Renew service (called by timer)
-    cat > "$renew_service_file" <<EOF_RENEW
+    cat >"$renew_service_file" <<EOF_RENEW
 [Unit]
 Description=SUI-Control certificate renewal
 After=docker.service network-online.target
@@ -512,7 +547,7 @@ WantedBy=multi-user.target
 EOF_RENEW
 
     # Timer
-    cat > "$timer_file" <<EOF_TIMER
+    cat >"$timer_file" <<EOF_TIMER
 [Unit]
 Description=Run s-ui certificate renewal periodically
 
@@ -535,10 +570,10 @@ EOF_TIMER
     local timer_link="$SYSTEMD_DST_DIR/$SYSTEMD_RENEW_TIMER_NAME"
     mkdir -p "$SYSTEMD_DST_DIR"
     ln -sfn "$control_service_file" "$control_link"
-    ln -sfn "$renew_service_file"   "$renew_svc_link"
-    ln -sfn "$timer_file"           "$timer_link"
+    ln -sfn "$renew_service_file" "$renew_svc_link"
+    ln -sfn "$timer_file" "$timer_link"
     systemctl daemon-reload
-    systemctl enable --now "$SYSTEMD_CONTROL_SERVICE_NAME"  >/dev/null 2>&1 || true
+    systemctl enable --now "$SYSTEMD_CONTROL_SERVICE_NAME" >/dev/null 2>&1 || true
     systemctl enable --now "$SYSTEMD_RENEW_TIMER_NAME" >/dev/null 2>&1 || true
 }
 
@@ -548,8 +583,8 @@ _remove_timer_systemd() {
     local timer_link="$SYSTEMD_DST_DIR/$SYSTEMD_RENEW_TIMER_NAME"
     if command_exists systemctl; then
         systemctl disable --now "$SYSTEMD_CONTROL_SERVICE_NAME" >/dev/null 2>&1 || true
-        systemctl disable --now "$SYSTEMD_RENEW_TIMER_NAME"     >/dev/null 2>&1 || true
-        systemctl stop "$SYSTEMD_RENEW_SERVICE_NAME"            >/dev/null 2>&1 || true
+        systemctl disable --now "$SYSTEMD_RENEW_TIMER_NAME" >/dev/null 2>&1 || true
+        systemctl stop "$SYSTEMD_RENEW_SERVICE_NAME" >/dev/null 2>&1 || true
     fi
     rm -f "$control_link" "$renew_svc_link" "$timer_link"
     if command_exists systemctl; then systemctl daemon-reload || true; fi
@@ -560,7 +595,7 @@ _remove_timer_systemd() {
 # ----------------------------------------------------------------------
 _install_timer_openrc() {
     local init_file="/etc/init.d/sui-control"
-    cat > "$init_file" <<OPENRC_INIT
+    cat >"$init_file" <<OPENRC_INIT
 #!/sbin/openrc-run
 # SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -605,13 +640,13 @@ _remove_timer_openrc() {
 _install_timer_runit() {
     local sv_dir="/etc/sv/sui-control"
     mkdir -p "$sv_dir"
-    cat > "$sv_dir/run" <<RUNIT_RUN
+    cat >"$sv_dir/run" <<RUNIT_RUN
 #!/bin/sh
 exec chpst -u $SUI_CONTROL_USER $PACKAGE_DIR/sui-control.sh start
 RUNIT_RUN
     chmod 0755 "$sv_dir/run"
 
-    cat > "$sv_dir/finish" <<RUNIT_FINISH
+    cat >"$sv_dir/finish" <<RUNIT_FINISH
 #!/bin/sh
 exec $PACKAGE_DIR/sui-control.sh stop
 RUNIT_FINISH
@@ -633,7 +668,7 @@ _remove_timer_runit() {
 # ----------------------------------------------------------------------
 _install_timer_s6() {
     mkdir -p "$S6_SERVICE_DIR"
-    cat > "$S6_SERVICE_DIR/run" <<S6_RUN
+    cat >"$S6_SERVICE_DIR/run" <<S6_RUN
 #!/bin/execlineb -P
 s6-setuidgid $SUI_CONTROL_USER
 $PACKAGE_DIR/sui-control.sh start
@@ -656,7 +691,7 @@ _remove_timer_s6() {
 # ----------------------------------------------------------------------
 _install_timer_dinit() {
     local sv_file="/etc/dinit.d/sui-control"
-    cat > "$sv_file" <<DINIT_SVC
+    cat >"$sv_file" <<DINIT_SVC
 type = process
 command = $PACKAGE_DIR/sui-control.sh start
 stop-command = $PACKAGE_DIR/sui-control.sh stop
@@ -687,33 +722,38 @@ _remove_timer_dinit() {
 _systemd_oncalendar_to_cron() {
     local cal="$1" day_part time_part hour min d nums days
     case "$cal" in
-        daily|weekly|monthly|yearly|annually|@*)
-            case "$cal" in
-                daily)     printf '%s\n' '@daily' ;;
-                weekly)    printf '%s\n' '@weekly' ;;
-                monthly)   printf '%s\n' '@monthly' ;;
-                yearly|annually) printf '%s\n' '@yearly' ;;
-                *)         printf '%s\n' "$cal" ;;
-            esac
-            return ;;
+    daily | weekly | monthly | yearly | annually | @*)
+        case "$cal" in
+        daily) printf '%s\n' '@daily' ;;
+        weekly) printf '%s\n' '@weekly' ;;
+        monthly) printf '%s\n' '@monthly' ;;
+        yearly | annually) printf '%s\n' '@yearly' ;;
+        *) printf '%s\n' "$cal" ;;
+        esac
+        return
+        ;;
     esac
     day_part="${cal%% *}"
     time_part="${cal##* }"
     hour="${time_part%%:*}"
-    min="${time_part#*:}"; min="${min%%:*}"
+    min="${time_part#*:}"
+    min="${min%%:*}"
     if [[ "$day_part" == *,* ]]; then
         nums=""
-        IFS=',' read -r -a days <<< "$day_part"
+        IFS=',' read -r -a days <<<"$day_part"
         for d in "${days[@]}"; do
             case "$d" in
-                Sun) nums="${nums},0" ;;
-                Mon) nums="${nums},1" ;;
-                Tue) nums="${nums},2" ;;
-                Wed) nums="${nums},3" ;;
-                Thu) nums="${nums},4" ;;
-                Fri) nums="${nums},5" ;;
-                Sat) nums="${nums},6" ;;
-                *)   nums=""; break ;;
+            Sun) nums="${nums},0" ;;
+            Mon) nums="${nums},1" ;;
+            Tue) nums="${nums},2" ;;
+            Wed) nums="${nums},3" ;;
+            Thu) nums="${nums},4" ;;
+            Fri) nums="${nums},5" ;;
+            Sat) nums="${nums},6" ;;
+            *)
+                nums=""
+                break
+                ;;
             esac
         done
         if [[ -n "$nums" ]]; then
@@ -722,9 +762,9 @@ _systemd_oncalendar_to_cron() {
         fi
     fi
     case "$day_part" in
-        Mon)     printf '%s %s * * 1\n' "$min" "$hour" ;;
-        Sat,Sun) printf '%s %s * * 0,6\n' "$min" "$hour" ;;
-        *)       printf '%s %s * * *\n' "$min" "$hour" ;;
+    Mon) printf '%s %s * * 1\n' "$min" "$hour" ;;
+    Sat,Sun) printf '%s %s * * 0,6\n' "$min" "$hour" ;;
+    *) printf '%s %s * * *\n' "$min" "$hour" ;;
     esac
 }
 
@@ -733,7 +773,7 @@ _create_cron_job() {
     local cron_schedule
     cron_schedule="$(_systemd_oncalendar_to_cron "$TIMER_ON_CALENDAR")"
     mkdir -p "$CRON_DST_DIR"
-    cat > "$cron_file" <<CRONEOF
+    cat >"$cron_file" <<CRONEOF
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
@@ -752,27 +792,27 @@ _remove_cron_job() {
 install_renewal_timer() {
     detect_init_system
     case "$INIT_SYSTEM" in
-        systemd) _install_timer_systemd ;;
-        openrc)  _install_timer_openrc  ;;
-        runit)   _install_timer_runit   ;;
-        s6)      _install_timer_s6      ;;
-        dinit)   _install_timer_dinit   ;;
-        *)
-            log_warn "No supported init system found; creating cron job only"
-            _create_cron_job
-            ;;
+    systemd) _install_timer_systemd ;;
+    openrc) _install_timer_openrc ;;
+    runit) _install_timer_runit ;;
+    s6) _install_timer_s6 ;;
+    dinit) _install_timer_dinit ;;
+    *)
+        log_warn "No supported init system found; creating cron job only"
+        _create_cron_job
+        ;;
     esac
 }
 
 remove_renewal_timer() {
     detect_init_system
     case "$INIT_SYSTEM" in
-        systemd) _remove_timer_systemd ;;
-        openrc)  _remove_timer_openrc  ;;
-        runit)   _remove_timer_runit   ;;
-        s6)      _remove_timer_s6      ;;
-        dinit)   _remove_timer_dinit   ;;
-        *)       _remove_cron_job      ;;
+    systemd) _remove_timer_systemd ;;
+    openrc) _remove_timer_openrc ;;
+    runit) _remove_timer_runit ;;
+    s6) _remove_timer_s6 ;;
+    dinit) _remove_timer_dinit ;;
+    *) _remove_cron_job ;;
     esac
 }
 
@@ -788,7 +828,7 @@ issue_certificate() {
         generate_self_signed_cert
         restart_sui_container
     elif [[ "$CERT_MODE" == "acme" ]]; then
-        [[ -x "$resolved_bin_dir/$ACME_CERT_SCRIPT_NAME" ]]             || die "ACME cert script not found: $resolved_bin_dir/$ACME_CERT_SCRIPT_NAME"
+        [[ -x "$resolved_bin_dir/$ACME_CERT_SCRIPT_NAME" ]] || die "ACME cert script not found: $resolved_bin_dir/$ACME_CERT_SCRIPT_NAME"
         "$resolved_bin_dir/$ACME_CERT_SCRIPT_NAME" issue
     fi
 }
@@ -837,10 +877,11 @@ substitute_template() {
     (
         for entry in $shell_fmt; do
             [[ -z "$entry" ]] && continue
-            v="${entry#\$\{}"; v="${v%\}}";
+            v="${entry#\$\{}"
+            v="${v%\}}"
             export "${v}=${!v:-}"
         done
-        envsubst "$shell_fmt" < "$template" > "$output"
+        envsubst "$shell_fmt" <"$template" >"$output"
     )
 }
 
@@ -861,10 +902,10 @@ _run_installation_core() {
     # shellcheck disable=SC2153
     local db_timeout="$DB_TIMEOUT" db_elapsed=0
     log_info "Waiting for s-ui to initialize database (up to ${db_timeout}s)..."
-    while (( db_elapsed < db_timeout )); do
+    while ((db_elapsed < db_timeout)); do
         [[ -f "$db_path" && -s "$db_path" ]] && break
         sleep "$DB_POLL_INTERVAL"
-        db_elapsed=$(( db_elapsed + DB_POLL_INTERVAL ))
+        db_elapsed=$((db_elapsed + DB_POLL_INTERVAL))
     done
     if [[ ! -f "$db_path" || ! -s "$db_path" ]]; then
         docker logs "$CONTAINER_NAME" 2>/dev/null | tail -n 50 >&2 || true
@@ -890,9 +931,9 @@ _run_installation_core() {
 # ----------------------------------------------------------------------
 bootstrap_installation() {
     setup_sui_user
-    _randomize_if_default SUI_PANEL_PORT        "$DEFAULT_SUI_PANEL_PORT"        CLI_PANEL_PORT_SET        ""               generate_random_port 20000 40000
+    _randomize_if_default SUI_PANEL_PORT "$DEFAULT_SUI_PANEL_PORT" CLI_PANEL_PORT_SET "" generate_random_port 20000 40000
     _randomize_if_default SUI_SUBSCRIPTION_PORT "$DEFAULT_SUI_SUBSCRIPTION_PORT" CLI_SUBSCRIPTION_PORT_SET "$SUI_PANEL_PORT" generate_random_port 20000 40000
-    _randomize_if_default SUI_PANEL_PATH        "$DEFAULT_SUI_PANEL_PATH"        CLI_PANEL_PATH_SET        ""               generate_random_path_segment
+    _randomize_if_default SUI_PANEL_PATH "$DEFAULT_SUI_PANEL_PATH" CLI_PANEL_PATH_SET "" generate_random_path_segment
     _randomize_if_default SUI_SUBSCRIPTION_PATH "$DEFAULT_SUI_SUBSCRIPTION_PATH" CLI_SUBSCRIPTION_PATH_SET "$SUI_PANEL_PATH" generate_random_path_segment
 
     [[ "$BATCH_INSTALL" != "1" ]] && run_interactive_config_menu
@@ -903,7 +944,7 @@ bootstrap_installation() {
     prepare_effective_settings
     check_install_requirements
 
-    check_tcp_port_free "$SUI_PANEL_PORT"        || die "Panel TCP port is already in use: $SUI_PANEL_PORT"
+    check_tcp_port_free "$SUI_PANEL_PORT" || die "Panel TCP port is already in use: $SUI_PANEL_PORT"
     check_tcp_port_free "$SUI_SUBSCRIPTION_PORT" || die "Subscription TCP port is already in use: $SUI_SUBSCRIPTION_PORT"
 
     if [[ "$CERT_MODE" == "acme" ]]; then
@@ -920,7 +961,7 @@ bootstrap_installation() {
 
     mkdir -p "$RUNTIME_BIN_DIR" "$RUNTIME_DATA_DIR" "$RUNTIME_CERT_DIR" "$RUNTIME_ACME_DIR" "$RUNTIME_SYSTEMD_DIR"
 
-    substitute_template "$PACKAGE_DIR/templates/sui-control.conf.tpl"  "$CONFIG_DIR/$CONFIG_FILE_NAME"
+    substitute_template "$PACKAGE_DIR/templates/sui-control.conf.tpl" "$CONFIG_DIR/$CONFIG_FILE_NAME"
     chmod 0600 "$CONFIG_DIR/$CONFIG_FILE_NAME"
 
     if [[ "$CERT_MODE" == "acme" ]]; then
