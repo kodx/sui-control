@@ -9,6 +9,8 @@ OUTPUT="$PROJECT_DIR/sui-control-install.sh"
 
 if tag="$(git -C "$PROJECT_DIR" describe --tags --match 'v*' --abbrev=0 2>/dev/null)"; then
     VERSION="${tag#v}"
+elif [[ -f "$PROJECT_DIR/VERSION" ]]; then
+    VERSION="$(cat "$PROJECT_DIR/VERSION")"
 else
     VERSION='0.0.0-dev'
 fi

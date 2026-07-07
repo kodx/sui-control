@@ -9,7 +9,9 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_DIR"
 cleanup() { rm -f "$PROJECT_DIR/debian"; }
 trap cleanup EXIT
-version="$(git describe --tags --match 'v*' --abbrev=0 2>/dev/null | sed 's/^v//' || echo '0.0.0-dev')"
+version="$(git describe --tags --match 'v*' --abbrev=0 2>/dev/null | sed 's/^v//')"
+[[ -z "$version" ]] && version="$(cat "$PROJECT_DIR/VERSION" 2>/dev/null)"
+: "${version:=0.0.0-dev}"
 date_rfc="$(date -R)"
 cat > build/debian/changelog <<EOF
 sui-control (${version}-1) stable; urgency=medium
