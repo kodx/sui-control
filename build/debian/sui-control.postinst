@@ -6,7 +6,7 @@ case "$1" in
         umask 022
 
         if ! getent passwd sui-control >/dev/null; then
-            adduser --system --no-create-home --shell /usr/sbin/nologin sui-control
+            adduser --system --group --no-create-home --shell /usr/sbin/nologin sui-control
         fi
 
         if ! getent group sui-control >/dev/null; then
@@ -16,17 +16,22 @@ case "$1" in
         mkdir -p /etc/sui-control \
             /var/lib/sui-control/bin \
             /var/lib/sui-control/db \
-            /var/lib/sui-control/cert \
             /var/lib/sui-control/acme \
             /var/lib/sui-control/systemd
 
         chown -R sui-control:sui-control /etc/sui-control /var/lib/sui-control
 
         chmod g+w /etc/sui-control
+        chmod -R g+w /var/lib/sui-control
 
         if ! groups sui-control >/dev/null 2>&1 | grep -qw docker; then
             adduser sui-control docker >/dev/null 2>&1 || true
         fi
+
+        # Create dangling symlinks to systemd service dir (files are created at setup time)
+        ln -sfn /var/lib/sui-control/systemd/sui-control.service /etc/systemd/system/sui-control.service
+        ln -sfn /var/lib/sui-control/systemd/sui-control-renew.service /etc/systemd/system/sui-control-renew.service
+        ln -sfn /var/lib/sui-control/systemd/sui-control-renew.timer /etc/systemd/system/sui-control-renew.timer
 
         cat <<MSG
 

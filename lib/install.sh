@@ -1,6 +1,5 @@
 # shellcheck shell=bash
 # shellcheck disable=SC2034
-# .editorconfig hint: indent_style = space, indent_size = 4
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Install-only functions — not deployed to target
 
@@ -102,21 +101,6 @@ parse_install_options() {
     fi
 }
 
-# ----------------------------------------------------------------------
-# Setup sui-control user
-# ----------------------------------------------------------------------
-setup_sui_user() {
-    if id "$SUI_CONTROL_USER" &>/dev/null; then
-        log_info "User $SUI_CONTROL_USER already exists"
-    else
-        log_info "Creating system user $SUI_CONTROL_USER"
-        useradd --system --no-create-home --shell /usr/sbin/nologin "$SUI_CONTROL_USER"
-    fi
-    if ! groups "$SUI_CONTROL_USER" 2>/dev/null | grep -qw docker; then
-        log_info "Adding $SUI_CONTROL_USER to docker group"
-        usermod -aG docker "$SUI_CONTROL_USER"
-    fi
-}
 
 # ----------------------------------------------------------------------
 # Install logic

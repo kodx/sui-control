@@ -9,12 +9,13 @@ panel_port=${SUI_PANEL_PORT}
 subscription_port=${SUI_SUBSCRIPTION_PORT}
 panel_path=${SUI_PANEL_PATH}
 subscription_path=${SUI_SUBSCRIPTION_PATH}
-inbound_ports=${INBOUND_PORTS}
 init_system=${INIT_SYSTEM}
 sui_image=${SUI_IMAGE}
 curl_test_image=${CURL_TEST_IMAGE}
 container_stamp=${CONTAINER_STAMP}
 acme_image=${ACME_IMAGE}
+acme_ca=${ACME_CA}
+acme_email=${ACME_EMAIL}
 
 # --- Internal paths (set by installer; do not edit) ---
 package_dir=${PACKAGE_DIR}

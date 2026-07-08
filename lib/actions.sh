@@ -1,5 +1,4 @@
 # shellcheck shell=bash
-# .editorconfig hint: indent_style = space, indent_size = 4
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Project-specific actions
 
@@ -203,12 +202,24 @@ _randomize_if_default() {
 # ----------------------------------------------------------------------
 # Interactive config menu
 # ----------------------------------------------------------------------
+_menu_item() {
+    local num="$1" label="$2" value="$3"
+    printf " %s) %b%-20s%b %b%s%b\n"         "$num" "$COLOR_LABEL" "$label" "$COLOR_RESET"         "$COLOR_INFO" "$value" "$COLOR_RESET"
+}
+
 run_interactive_config_menu() {
     local cert_mode domain panel_port sub_port panel_path sub_path tz choice ans
+    local acme_ca="letsencrypt" acme_email=""
 
     cert_mode="selfsigned"
     domain=""
     tz="${TZ:-}"
+    if [[ -z "$tz" && -f /etc/timezone ]]; then
+        tz="$(cat /etc/timezone)"
+    fi
+    if [[ -z "$tz" && -L /etc/localtime ]]; then
+        tz="$(readlink -f /etc/localtime | sed 's|/usr/share/zoneinfo/||' | sed 's|^./||')"
+    fi
     while true; do
         panel_port=$(generate_random_port 1024 65535)
         check_tcp_port_free "$panel_port" && break
@@ -220,27 +231,53 @@ run_interactive_config_menu() {
     panel_path="${SUI_PANEL_PATH:-panel}"
     sub_path="${SUI_SUBSCRIPTION_PATH:-sub}"
 
+    printf "%b\n" "${COLOR_BANNER}┌─────────────────────────────────────────┐${COLOR_RESET}"
+    printf "%b│         s-ui Control Setup              │%b\n" "${COLOR_BANNER}" "${COLOR_RESET}"
+    printf "%b│                                         │%b\n" "${COLOR_BANNER}" "${COLOR_RESET}"
+    printf "%b│  This wizard will guide you through     │%b\n" "${COLOR_BANNER}" "${COLOR_RESET}"
+    printf "%b│  configuring your s-ui deployment.      │%b\n" "${COLOR_BANNER}" "${COLOR_RESET}"
+    printf "%b│  You can accept defaults or enter your  │%b\n" "${COLOR_BANNER}" "${COLOR_RESET}"
+    printf "%b│  own values for each setting.           │%b\n" "${COLOR_BANNER}" "${COLOR_RESET}"
+    printf "%b└─────────────────────────────────────────┘%b\n" "${COLOR_BANNER}" "${COLOR_RESET}"
+
     while true; do
         echo
         echo "sui-control configuration"
         echo "========================="
-        echo " 1) Certificate mode    $cert_mode"
-        echo " 2) Domain/IP           ${domain:-<none>}"
-        echo " 3) Panel port          $panel_port"
-        echo " 4) Subscription port   $sub_port"
-        echo " 5) Panel path          $panel_path"
-        echo " 6) Subscription path   $sub_path"
-        echo " 7) Timezone            ${tz:-<none>}"
+
+        menu_data=(
+            "Certificate mode"  "$cert_mode"
+            "ACME CA"           "$acme_ca"
+            "ACME Email"        "${acme_email:-<none>}"
+            "Domain/IP"         "${domain:-<none>}"
+            "Panel port"        "$panel_port"
+            "Subscription port" "$sub_port"
+            "Panel path"        "$panel_path"
+            "Subscription path" "$sub_path"
+            "Timezone"          "${tz:-<none>}"
+        )
+        for ((i = 0; i < ${#menu_data[@]}; i += 2)); do
+            _menu_item "$((i / 2 + 1))" "${menu_data[i]}" "${menu_data[i+1]}"
+        done
+
+        local proto="https"
+        local host="${domain:-localhost}"
+        echo " ─────────────────────────────────────"
+        printf "    %bPanel:%b %s://%s:%s/%s\n" "$COLOR_LABEL" "$COLOR_RESET" "$proto" "$host" "$panel_port" "$panel_path"
+        printf "    %bSub:%b   %s://%s:%s/%s\n" "$COLOR_LABEL" "$COLOR_RESET" "$proto" "$host" "$sub_port" "$sub_path"
+        echo
         echo " a) Accept and continue"
         echo " q) Quit without saving"
         echo
-        read -r -p "Select option: " choice
+        printf "%bSelect option: %b" "$COLOR_QUESTION" "$COLOR_RESET" >&2
+        read -r choice
         case "$choice" in
         1)
             echo "Certificate mode:"
             echo "  1) selfsigned"
             echo "  2) acme"
-            read -r -p "Select [1]: " ans
+            printf "%bSelect [1]: %b" "$COLOR_QUESTION" "$COLOR_RESET" >&2
+            read -r ans
             case "${ans:-1}" in
             1)
                 cert_mode="selfsigned"
@@ -248,58 +285,101 @@ run_interactive_config_menu() {
                 ;;
             2)
                 cert_mode="acme"
-                read -r -p "Domain or IP for ACME: " domain
+                echo "ACME CA:"
+                echo "  1) letsencrypt"
+                echo "  2) zerossl"
+                printf "%bSelect [1]: %b" "$COLOR_QUESTION" "$COLOR_RESET" >&2
+                read -r ans
+                case "${ans:-1}" in
+                1) acme_ca="letsencrypt" ;;
+                2) acme_ca="zerossl"
+                   printf "%bEmail for ZeroSSL registration (optional, change CA later to skip): %b" "$COLOR_QUESTION" "$COLOR_RESET" >&2
+                   read -r ans
+                   acme_email="$ans"
+                   ;;
+                esac
+                printf "%bDomain or IP for ACME: %b" "$COLOR_QUESTION" "$COLOR_RESET" >&2
+                read -r domain
                 ;;
-            *) echo "Invalid selection." ;;
+            *) log_warn "Invalid selection." ;;
             esac
             ;;
         2)
-            if [[ "$cert_mode" == "acme" ]]; then
-                read -r -p "Domain or IP for ACME: " domain
-            else
-                echo "Domain is only used in acme mode. Change certificate mode first."
-            fi
+            echo "ACME CA:"
+            echo "  1) letsencrypt"
+            echo "  2) zerossl"
+            printf "%bSelect [${acme_ca}]: %b" "$COLOR_QUESTION" "$COLOR_RESET" >&2
+            read -r ans
+            case "${ans:-1}" in
+            1) acme_ca="letsencrypt" ;;
+            2) acme_ca="zerossl" ;;
+            *) log_warn "Invalid selection." ;;
+            esac
             ;;
         3)
-            read -r -p "Panel port [$panel_port]: " ans
-            panel_port="${ans:-$panel_port}"
-            validate_port "Panel port" "$panel_port" || {
-                echo "Invalid port"
-                continue
-            }
+            printf "%bEmail for ACME registration (optional, required for ZeroSSL): %b" "$COLOR_QUESTION" "$COLOR_RESET" >&2
+            read -r ans
+            acme_email="$ans"
             ;;
         4)
-            read -r -p "Subscription port [$sub_port]: " ans
-            sub_port="${ans:-$sub_port}"
-            validate_port "Subscription port" "$sub_port" || {
-                echo "Invalid port"
-                continue
-            }
+            if [[ "$cert_mode" == "acme" ]]; then
+                printf "%bDomain or IP for ACME: %b" "$COLOR_QUESTION" "$COLOR_RESET" >&2
+                read -r domain
+            else
+                log_warn "Domain is only used in acme mode. Change certificate mode first."
+            fi
             ;;
         5)
-            read -r -p "Panel path [$panel_path]: " ans
-            panel_path="${ans:-$panel_path}"
-            validate_url_path_segment "Panel path" "$panel_path" || {
-                echo "Invalid path"
+            printf "%bPanel port [$panel_port]: %b" "$COLOR_QUESTION" "$COLOR_RESET" >&2
+            read -r ans
+            panel_port="${ans:-$panel_port}"
+            validate_port "Panel port" "$panel_port" || {
+                log_warn "Invalid port"
                 continue
             }
             ;;
         6)
-            read -r -p "Subscription path [$sub_path]: " ans
-            sub_path="${ans:-$sub_path}"
-            validate_url_path_segment "Subscription path" "$sub_path" || {
-                echo "Invalid path"
+            printf "%bSubscription port [$sub_port]: %b" "$COLOR_QUESTION" "$COLOR_RESET" >&2
+            read -r ans
+            sub_port="${ans:-$sub_port}"
+            validate_port "Subscription port" "$sub_port" || {
+                log_warn "Invalid port"
                 continue
             }
             ;;
         7)
-            read -r -p "Timezone [$tz]: " ans
+            printf "%bPanel path [$panel_path]: %b" "$COLOR_QUESTION" "$COLOR_RESET" >&2
+            read -r ans
+            panel_path="${ans:-$panel_path}"
+            validate_url_path_segment "Panel path" "$panel_path" || {
+                log_warn "Invalid path"
+                continue
+            }
+            ;;
+        8)
+            printf "%bSubscription path [$sub_path]: %b" "$COLOR_QUESTION" "$COLOR_RESET" >&2
+            read -r ans
+            sub_path="${ans:-$sub_path}"
+            validate_url_path_segment "Subscription path" "$sub_path" || {
+                log_warn "Invalid path"
+                continue
+            }
+            ;;
+        9)
+            printf "%bTimezone [$tz]: %b" "$COLOR_QUESTION" "$COLOR_RESET" >&2
+            read -r ans
             tz="${ans:-$tz}"
             ;;
         a | A)
-            if [[ "$cert_mode" == "acme" && -z "$domain" ]]; then
-                echo "Domain/IP is required for acme mode."
-                continue
+            if [[ "$cert_mode" == "acme" ]]; then
+                if [[ -z "$domain" ]]; then
+                    log_warn "Domain/IP is required for acme mode."
+                    continue
+                fi
+                if [[ "$acme_ca" == "zerossl" && -z "$acme_email" ]]; then
+                    log_warn "ZeroSSL requires an email for account registration. Switch to letsencrypt or provide an email (option 3)."
+                    continue
+                fi
             fi
             break
             ;;
@@ -308,7 +388,7 @@ run_interactive_config_menu() {
             exit 0
             ;;
         *)
-            echo "Invalid option: $choice"
+            log_warn "Invalid option: $choice"
             ;;
         esac
     done
@@ -325,6 +405,12 @@ EOF
     if [[ -n "$domain" ]]; then
         echo "domain=$domain" >>"$CONFIG_DIR/$CONFIG_FILE_NAME"
     fi
+    if [[ -n "$acme_ca" ]]; then
+        echo "acme_ca=$acme_ca" >>"$CONFIG_DIR/$CONFIG_FILE_NAME"
+    fi
+    if [[ -n "$acme_email" ]]; then
+        echo "acme_email=$acme_email" >>"$CONFIG_DIR/$CONFIG_FILE_NAME"
+    fi
     if [[ -n "$tz" ]]; then
         echo "tz=$tz" >>"$CONFIG_DIR/$CONFIG_FILE_NAME"
     fi
@@ -332,37 +418,18 @@ EOF
     CERT_MODE="$cert_mode"
     DOMAIN="${domain:-}"
     TZ="$tz"
+    ACME_CA="$acme_ca"
+    ACME_EMAIL="$acme_email"
     SUI_PANEL_PORT="$panel_port"
     SUI_SUBSCRIPTION_PORT="$sub_port"
     SUI_PANEL_PATH="$panel_path"
     SUI_SUBSCRIPTION_PATH="$sub_path"
 
-    echo "Created $CONFIG_DIR/$CONFIG_FILE_NAME"
-}
-
-prompt_yes_no() {
-    local prompt="$1"
-    local default_answer="${2:-n}"
-    local answer hint
-    case "$default_answer" in
-    y | Y) hint='[Y/n]' ;;
-    *) hint='[y/N]' ;;
-    esac
-    while true; do
-        read -r -p "$prompt $hint: " answer || true
-        answer="${answer:-$default_answer}"
-        case "$answer" in
-        y | Y | yes | YES) return 0 ;;
-        n | N | no | NO) return 1 ;;
-        *) echo 'Enter y or n.' ;;
-        esac
-    done
 }
 
 # ----------------------------------------------------------------------
-# Certificate management
+# Self-signed certificate generation
 # ----------------------------------------------------------------------
-
 generate_self_signed_cert() {
     local cert_root cert_cn tmp_conf
     require_command openssl
@@ -389,36 +456,11 @@ extendedKeyUsage=serverAuth
 [alt_names]
 DNS.1=$cert_cn
 EOF_SSL
-    openssl req -x509 -nodes -newkey rsa:2048 -days "$SELF_SIGNED_DAYS" \
-        -keyout "$cert_root/privkey.pem" \
-        -out "$cert_root/fullchain.pem" \
-        -config "$tmp_conf" >/dev/null 2>&1
+    openssl req -x509 -nodes -newkey rsa:2048 -days "$SELF_SIGNED_DAYS"         -keyout "$cert_root/privkey.pem"         -out "$cert_root/fullchain.pem"         -config "$tmp_conf" >/dev/null 2>&1
     chmod 0600 "$cert_root/privkey.pem"
     chmod 0644 "$cert_root/fullchain.pem"
     rm -f "$tmp_conf"
     trap - EXIT
-}
-
-# ----------------------------------------------------------------------
-# File generation helpers
-# ----------------------------------------------------------------------
-create_generated_file() {
-    local base_dir="$1"
-    local file_name="$2"
-    local generator="$3"
-    local mode="${4:-}"
-    local label="${5:-file}"
-    local path="$base_dir/$file_name"
-    local old_umask
-    log_info "Creating $label at: $path"
-    old_umask="$(umask)"
-    umask 077
-    "$generator" >"$path" || {
-        umask "$old_umask"
-        die "Failed to create $label: $path"
-    }
-    umask "$old_umask"
-    [[ -n "$mode" ]] && chmod "$mode" "$path"
 }
 
 # ----------------------------------------------------------------------
@@ -430,14 +472,7 @@ assert_nonempty_value() {
 }
 
 _compute_container_stamp() {
-    local ports
-    ports="$(get_inbound_ports | tr '\n' ',' | sed 's/,$//')" || ports=""
-    printf '%s' "v1|${ports}|${SUI_PANEL_PORT}|${SUI_SUBSCRIPTION_PORT}|${SUI_IMAGE}|${TZ}"
-}
-
-get_inbound_ports() {
-    [[ -n "$INBOUND_PORTS" ]] || return 0
-    tr ',' '\n' <<<"$INBOUND_PORTS" | sort -n
+    printf '%s' "v2|${SUI_PANEL_PORT}|${SUI_SUBSCRIPTION_PORT}|${SUI_IMAGE}|${TZ}"
 }
 
 _update_config_stamp() {
@@ -452,21 +487,10 @@ _update_config_stamp() {
         echo "container_stamp=$new_stamp" >>"$config_file"
     fi
 }
+
+
 start_containers() {
-    local port new_stamp
-    local ports_args=() docker_opts=()
-
-    while IFS= read -r port; do
-        [[ -z "$port" ]] && continue
-        [[ "$port" =~ ^[0-9]+$ && "$port" -ge 1 && "$port" -le 65535 ]] || {
-            log_warn "Invalid inbound port, skipping: $port"
-            continue
-        }
-        ports_args+=(-p "$port:$port")
-    done < <(get_inbound_ports)
-
-    ports_args+=(-p "$SUI_PANEL_PORT:$SUI_PANEL_PORT")
-    ports_args+=(-p "$SUI_SUBSCRIPTION_PORT:$SUI_SUBSCRIPTION_PORT")
+    local new_stamp
 
     if [[ -n "${TZ:-}" && ! "$TZ" =~ ^[A-Za-z0-9_+/-]+$ ]]; then
         log_warn "Invalid TZ value, skipping timezone configuration: $TZ"
@@ -480,12 +504,9 @@ start_containers() {
         return 0
     fi
 
-    docker network inspect "$DOCKER_NETWORK" >/dev/null 2>&1 || { docker network create "$DOCKER_NETWORK" >/dev/null || die "Failed to create Docker network: $DOCKER_NETWORK"; }
-    docker stop "$CONTAINER_NAME" 2>/dev/null || true
-    docker rm "$CONTAINER_NAME" 2>/dev/null || true
-    docker_opts=("${ports_args[@]}")
-    [[ -n "$TZ" ]] && docker_opts+=(-e "TZ=$TZ")
-    docker run -d --restart=unless-stopped --network "$DOCKER_NETWORK" --name "$CONTAINER_NAME" "${docker_opts[@]}" -v "$RUNTIME_DATA_DIR:/app/db" -v "$RUNTIME_CERT_DIR:/certs:ro" "$SUI_IMAGE" >/dev/null
+    docker stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
+    docker rm "$CONTAINER_NAME" >/dev/null 2>&1 || true
+    docker run -d --restart=unless-stopped --network host --name "$CONTAINER_NAME" ${TZ:+-e TZ="$TZ"} -v "$RUNTIME_DATA_DIR:/app/db" -v "$RUNTIME_CERT_DIR:/certs:ro" "$SUI_IMAGE" >/dev/null
     _update_config_stamp "$new_stamp"
     CONTAINER_STAMP="$new_stamp"
 }
@@ -522,9 +543,12 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+ExecStartPre=+/sbin/sysctl -q -w net.core.default_qdisc=fq
+ExecStartPre=+/sbin/sysctl -q -w net.ipv4.tcp_congestion_control=bbr
 ExecStart=$PACKAGE_DIR/sui-control.sh start
 ExecStop=$PACKAGE_DIR/sui-control.sh stop
 User=$SUI_CONTROL_USER
+Group=$SUI_CONTROL_USER
 
 [Install]
 WantedBy=multi-user.target
@@ -541,6 +565,7 @@ Wants=network-online.target
 Type=oneshot
 ExecStart=$PACKAGE_DIR/sui-control.sh renew
 User=$SUI_CONTROL_USER
+Group=$SUI_CONTROL_USER
 
 [Install]
 WantedBy=multi-user.target
@@ -569,14 +594,17 @@ EOF_TIMER
     local renew_svc_link="$SYSTEMD_DST_DIR/$SYSTEMD_RENEW_SERVICE_NAME"
     local timer_link="$SYSTEMD_DST_DIR/$SYSTEMD_RENEW_TIMER_NAME"
     mkdir -p "$SYSTEMD_DST_DIR"
-    ln -sfn "$control_service_file" "$control_link"
-    ln -sfn "$renew_service_file" "$renew_svc_link"
-    ln -sfn "$timer_file" "$timer_link"
-    systemctl daemon-reload
-    systemctl enable --now "$SYSTEMD_CONTROL_SERVICE_NAME" >/dev/null 2>&1 || true
-    systemctl enable --now "$SYSTEMD_RENEW_TIMER_NAME" >/dev/null 2>&1 || true
+    if [[ $EUID -eq 0 ]]; then
+        ln -sfn "$control_service_file" "$control_link"
+        ln -sfn "$renew_service_file" "$renew_svc_link"
+        ln -sfn "$timer_file" "$timer_link"
+        systemctl daemon-reload
+        systemctl enable --now "$SYSTEMD_CONTROL_SERVICE_NAME" >/dev/null 2>&1 || true
+        systemctl enable --now "$SYSTEMD_RENEW_TIMER_NAME" >/dev/null 2>&1 || true
+    else
+        ACTIVATION_CMD="systemctl daemon-reload && systemctl enable --now $SYSTEMD_CONTROL_SERVICE_NAME $SYSTEMD_RENEW_TIMER_NAME"
+    fi
 }
-
 _remove_timer_systemd() {
     local control_link="$SYSTEMD_DST_DIR/$SYSTEMD_CONTROL_SERVICE_NAME"
     local renew_svc_link="$SYSTEMD_DST_DIR/$SYSTEMD_RENEW_SERVICE_NAME"
@@ -624,8 +652,16 @@ stop() {
 OPENRC_INIT
     chmod 0755 "$init_file"
 
+    chmod 0755 "$init_file"
+
     _create_cron_job
-    if command_exists rc-update; then rc-update add sui-control default || true; fi
+    if command_exists rc-update; then
+        if [[ $EUID -eq 0 ]]; then
+            rc-update add sui-control default || true
+        else
+            ACTIVATION_CMD="rc-update add sui-control default"
+        fi
+    fi
 }
 
 _remove_timer_openrc() {
@@ -653,8 +689,11 @@ RUNIT_FINISH
     chmod 0755 "$sv_dir/finish"
 
     _create_cron_job
-    mkdir -p /etc/service
-    ln -sfn "$sv_dir" "/etc/service/sui-control" 2>/dev/null || true
+    if [[ $EUID -eq 0 ]]; then
+        ln -sfn "$sv_dir" "/etc/service/sui-control" 2>/dev/null || true
+    else
+        ACTIVATION_CMD="ln -sfn $sv_dir /etc/service/sui-control"
+    fi
 }
 
 _remove_timer_runit() {
@@ -676,8 +715,11 @@ S6_RUN
     chmod 0755 "$S6_SERVICE_DIR/run"
 
     _create_cron_job
-    mkdir -p /etc/s6
-    ln -sfn "$S6_SERVICE_DIR" "/etc/s6/service/sui-control" 2>/dev/null || true
+    if [[ $EUID -eq 0 ]]; then
+        ln -sfn "$S6_SERVICE_DIR" "/etc/s6/service/sui-control" 2>/dev/null || true
+    else
+        ACTIVATION_CMD="ln -sfn $S6_SERVICE_DIR /etc/s6/service/sui-control"
+    fi
 }
 
 _remove_timer_s6() {
@@ -703,7 +745,13 @@ waits-for = docker
 DINIT_SVC
 
     _create_cron_job
-    if command_exists dinitctl; then dinitctl enable sui-control || true; fi
+    if command_exists dinitctl; then
+        if [[ $EUID -eq 0 ]]; then
+            dinitctl enable sui-control || true
+        else
+            ACTIVATION_CMD="dinitctl enable sui-control"
+        fi
+    fi
 }
 
 _remove_timer_dinit() {
@@ -790,6 +838,7 @@ _remove_cron_job() {
 # Timer dispatcher
 # ----------------------------------------------------------------------
 install_renewal_timer() {
+    ACTIVATION_CMD=""
     detect_init_system
     case "$INIT_SYSTEM" in
     systemd) _install_timer_systemd ;;
@@ -914,16 +963,63 @@ _run_installation_core() {
 
     stop_containers
     [[ -f "$db_path" ]] || die "Database file not found after first start: $db_path"
+
+    export PACKAGE_DIR TZ
     "$db_script" "$INSTALL_GENERATED_USERNAME" "$INSTALL_GENERATED_PASSWORD"
     start_containers
 
     issue_certificate
     install_renewal_timer
+    if [[ -n "${ACTIVATION_CMD:-}" ]]; then
+        echo
+        log_info "Service activation requires root."
+        echo "  Command: sudo $ACTIVATION_CMD"
+        printf "%bActivate now with sudo? [y/N]: %b" "$COLOR_QUESTION" "$COLOR_RESET" >&2
+        read -r ans
+        case "${ans,,}" in
+        y | yes)
+            if sudo bash -c "$ACTIVATION_CMD"; then
+                log_info "Activated"
+            else
+                log_warn "Activation failed"
+            fi
+            ;;
+        esac
+    fi
     ensure_file_ownership "$CONFIG_DIR" "$RUNTIME_DIR"
 
-    log_info "$1"
-    log_info "Generated username: $INSTALL_GENERATED_USERNAME"
-    log_info "Generated password: $INSTALL_GENERATED_PASSWORD"
+    echo
+    echo "============================================"
+    echo "       SUI-Control Setup Complete"
+    echo "============================================"
+    local _proto="https"
+    local _host="${DOMAIN:-localhost}"
+    printf "  Panel:      %s://%s:%s/%s\n" "$_proto" "$_host" "$SUI_PANEL_PORT" "$SUI_PANEL_PATH"
+    printf "  Sub:        %s://%s:%s/%s\n" "$_proto" "$_host" "$SUI_SUBSCRIPTION_PORT" "$SUI_SUBSCRIPTION_PATH"
+    echo "  Username:   $INSTALL_GENERATED_USERNAME"
+    echo "  Password:   $INSTALL_GENERATED_PASSWORD"
+    echo "============================================"
+}
+
+setup_sui_user() {
+    if ! getent group "$SUI_CONTROL_USER" &>/dev/null; then
+        log_info "Creating system group $SUI_CONTROL_USER"
+        groupadd --system "$SUI_CONTROL_USER"
+    fi
+    if id "$SUI_CONTROL_USER" &>/dev/null; then
+        log_info "User $SUI_CONTROL_USER already exists"
+    else
+        log_info "Creating system user $SUI_CONTROL_USER"
+        useradd --system --gid "$SUI_CONTROL_USER" --no-create-home --shell /usr/sbin/nologin "$SUI_CONTROL_USER"
+    fi
+    if ! groups "$SUI_CONTROL_USER" 2>/dev/null | grep -qw "$SUI_CONTROL_USER"; then
+        log_info "Adding $SUI_CONTROL_USER to $SUI_CONTROL_USER group"
+        usermod -aG "$SUI_CONTROL_USER" "$SUI_CONTROL_USER" 2>/dev/null || true
+    fi
+    if ! groups "$SUI_CONTROL_USER" 2>/dev/null | grep -qw docker; then
+        log_info "Adding $SUI_CONTROL_USER to docker group"
+        usermod -aG docker "$SUI_CONTROL_USER"
+    fi
 }
 
 # ----------------------------------------------------------------------
@@ -960,16 +1056,21 @@ bootstrap_installation() {
     fi
 
     mkdir -p "$RUNTIME_BIN_DIR" "$RUNTIME_DATA_DIR" "$RUNTIME_CERT_DIR" "$RUNTIME_ACME_DIR" "$RUNTIME_SYSTEMD_DIR"
+    chmod -R g+w "$RUNTIME_DIR" 2>/dev/null || true
 
     substitute_template "$PACKAGE_DIR/templates/sui-control.conf.tpl" "$CONFIG_DIR/$CONFIG_FILE_NAME"
-    chmod 0600 "$CONFIG_DIR/$CONFIG_FILE_NAME"
+    chmod 0660 "$CONFIG_DIR/$CONFIG_FILE_NAME"
+    chgrp "$SUI_CONTROL_USER" "$CONFIG_DIR/$CONFIG_FILE_NAME" 2>/dev/null || true
+    log_info "Config written to $CONFIG_DIR/$CONFIG_FILE_NAME"
 
     if [[ "$CERT_MODE" == "acme" ]]; then
         substitute_template "$PACKAGE_DIR/templates/acme-cert.sh.tpl" "$RUNTIME_BIN_DIR/$ACME_CERT_SCRIPT_NAME"
-        chmod 0755 "$RUNTIME_BIN_DIR/$ACME_CERT_SCRIPT_NAME"
+        chmod 0770 "$RUNTIME_BIN_DIR/$ACME_CERT_SCRIPT_NAME"
+        chgrp "$SUI_CONTROL_USER" "$RUNTIME_BIN_DIR/$ACME_CERT_SCRIPT_NAME" 2>/dev/null || true
     fi
     substitute_template "$PACKAGE_DIR/templates/s-ui-db-configure.sh.tpl" "$RUNTIME_BIN_DIR/$DB_CONFIG_SCRIPT_NAME"
-    chmod 0755 "$RUNTIME_BIN_DIR/$DB_CONFIG_SCRIPT_NAME"
+    chmod 0770 "$RUNTIME_BIN_DIR/$DB_CONFIG_SCRIPT_NAME"
+    chgrp "$SUI_CONTROL_USER" "$RUNTIME_BIN_DIR/$DB_CONFIG_SCRIPT_NAME" 2>/dev/null || true
 
     _run_installation_core "Setup completed"
 }

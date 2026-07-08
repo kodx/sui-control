@@ -8,6 +8,7 @@ set -Eeuo pipefail
 . "$PACKAGE_DIR/lib/actions.sh"
 # shellcheck disable=SC1091
 . "$PACKAGE_DIR/lib/utils.sh"
+resolve_layout
 require_command docker
 ensure_config_loaded
 ensure_acme_mode
@@ -40,12 +41,19 @@ case "$MODE" in
             fi
         else
             log_info "Issuing ACME certificate for $DOMAIN"
+            if [[ -n "$ACME_EMAIL" ]]; then
+                docker run --rm -p 80:80 \
+                    -v "$RUNTIME_ACME_DIR:/acme.sh" \
+                    --entrypoint sh \
+                    "$ACME_IMAGE" \
+                    -c "acme.sh --register-account -m '$ACME_EMAIL' --server '$ACME_CA' --home /acme.sh"
+            fi
             if docker run --rm -p 80:80 \
                     -v "$RUNTIME_ACME_DIR:/acme.sh" \
                     -v "$RUNTIME_CERT_DIR:/certs" \
                     --entrypoint sh \
                     "$ACME_IMAGE" \
-                    -c "set -e; acme.sh --issue --standalone -d '$DOMAIN' --key-file /certs/server.key --fullchain-file /certs/server.crt --home /acme.sh"; then
+                    -c "set -e; acme.sh --issue --standalone --server '$ACME_CA' -d '$DOMAIN' --key-file /certs/server.key --fullchain-file /certs/server.crt --home /acme.sh"; then
                 log_info "Certificate issued successfully"
             else
                 die "ACME certificate issuance failed"

@@ -44,7 +44,7 @@ jobs:
 
       - name: Build deb package
         id: deb_build
-        run: bash build/build-deb.sh
+        run: bash build/build.sh deb
 
       - name: Upload install script
         uses: svenstaro/upload-release-action@v2

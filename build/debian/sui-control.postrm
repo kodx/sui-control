@@ -9,6 +9,9 @@ case "$1" in
         if getent group sui-control >/dev/null; then
             delgroup --quiet sui-control >/dev/null 2>&1 || true
         fi
+        rm -f /etc/systemd/system/sui-control.service
+        rm -f /etc/systemd/system/sui-control-renew.service
+        rm -f /etc/systemd/system/sui-control-renew.timer
         rm -rf /etc/sui-control /var/lib/sui-control /usr/lib/sui-control
         ;;
     *) exit 0 ;;

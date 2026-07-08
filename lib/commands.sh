@@ -1,6 +1,5 @@
 # shellcheck shell=bash
 # shellcheck disable=SC2034  # cross-file variables used in actions.sh
-# .editorconfig hint: indent_style = space, indent_size = 4
 # SPDX-License-Identifier: GPL-3.0-or-later
 # CLI commands and entry point
 
@@ -31,6 +30,7 @@ Commands:
   service-remove                Remove renewal timer/service.
   update                        Pull newer container images and restart services.
   cleanup                       Remove unused Docker containers and dangling images.
+  pre-remove                    Stop containers and remove Docker resources (package pre-remove hook).
   cleanup-all                   Remove unused Docker containers and all unused images.
   uninstall                     Stop containers and remove installed files.
 
@@ -179,6 +179,12 @@ cleanup_docker_artifacts() {
 # ----------------------------------------------------------------------
 # Uninstall
 # ----------------------------------------------------------------------
+pre_remove_cleanup() {
+    if command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
+        docker rm -f "${CONTAINER_NAME:-s-ui}" >/dev/null 2>&1 || true
+    fi
+}
+
 uninstall_control_script() {
     if [[ "$AUTO_CONFIRM" != "1" ]]; then
         prompt_yes_no "Remove s-ui installation?" 'n' ||
@@ -187,11 +193,7 @@ uninstall_control_script() {
                 return
             }
     fi
-    if docker info >/dev/null 2>&1; then
-        docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
-    else
-        log_warn "Docker daemon not reachable — skip container cleanup"
-    fi
+    pre_remove_cleanup
     if [[ -z "${RUNTIME_DIR:-}" || -z "${CONFIG_DIR:-}" ]]; then
         die "Refusing to remove empty RUNTIME_DIR or CONFIG_DIR"
     fi
@@ -398,6 +400,13 @@ dispatch_command() {
         CURRENT_COMMAND="cleanup-all"
         check_core_requirements
         cleanup_docker_artifacts 1
+        ;;
+    pre-remove)
+        CURRENT_COMMAND="pre-remove"
+        [[ -f "$CONFIG_DIR/$CONFIG_FILE_NAME" ]] && {
+            parse_config_file "$CONFIG_DIR/$CONFIG_FILE_NAME" 2>/dev/null || true
+        }
+        pre_remove_cleanup
         ;;
     uninstall)
         CURRENT_COMMAND="uninstall"

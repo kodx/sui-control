@@ -2,6 +2,7 @@
 
 ## Build & verify
 - Build: `bash build/build.sh` → produces `sui-control-install.sh` (available in GitHub Releases). Run whenever `lib/`, `templates/`, or `sui-control.sh` changes.
+- Debian package: `bash build/build.sh deb` → builds `.deb` to `build/artifacts/`. Use `--local` for Docker-based build.
 - Version bump: `bash build/bump-version.sh <major|minor|patch>` — bumps semver, creates annotated tag. Add `--dry-run` to preview.
 - Pre-commit: `.githooks/pre-commit` runs shellcheck on staged `.sh` files and actionlint on workflows. Set up via `git config core.hooksPath .githooks`.
 - `build.sh` also runs shellcheck on source files and the built artifact. A failing build means shellcheck errors.
@@ -17,7 +18,7 @@
 
 ## Conventions
 - `templates/*.conf.tpl`: no SPDX (config template, not a script)
-- `lib/*.sh`: no shebang (sourced), SPDX header (GPL-3.0-or-later), `.editorconfig` hint
+- `lib/*.sh`: no shebang (sourced), SPDX header (GPL-3.0-or-later)
 - `sui-control.sh`: `#!/usr/bin/env bash`, reads `VERSION` at runtime, sets `PACKAGE_DIR`
 - `build/build.sh`: `#!/usr/bin/env bash`, auto-generates `VERSION` from git tag or defaults to `0.0.0-dev`, embeds as `readonly BUILT_VERSION`
 - `# shellcheck disable=SCxxxx` on specific lines only; file-wide only for cross-file variables (SC2034, SC2154, SC2153 in built artifact)

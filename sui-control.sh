@@ -18,6 +18,7 @@ resolve_layout
 source "$SCRIPT_DIR/lib/actions.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/commands.sh"
+# shellcheck disable=SC1091
 
 init_config() {
     run_interactive_config_menu
@@ -37,6 +38,9 @@ case "${1:-}" in
     help|-h|--help)
         show_usage
         exit 0
+        ;;
+    setup)
+        dispatch_command "$@"
         ;;
     *)
         [[ -f "$CONFIG_DIR/$CONFIG_FILE_NAME" ]] || prompt_create_config

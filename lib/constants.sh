@@ -1,5 +1,4 @@
 # shellcheck shell=bash
-# .editorconfig hint: indent_style = space, indent_size = 4
 # SPDX-License-Identifier: GPL-3.0-or-later
 # shellcheck disable=SC2034
 # Constants, defaults, version, globals
@@ -11,7 +10,7 @@ ACME_CERT_SCRIPT_NAME="acme-cert.sh"
 DB_CONFIG_SCRIPT_NAME="s-ui-db-configure.sh"
 
 # --- FHS paths (set by resolve_layout() in utils.sh) ---
-CONFIG_DIR=""
+CONFIG_DIR="${CONFIG_DIR:-}"
 RUNTIME_DIR=""
 RUNTIME_BIN_DIR=""
 RUNTIME_SYSTEMD_DIR=""
@@ -57,22 +56,40 @@ CURL_TEST_IMAGE="${CURL_TEST_IMAGE:-$DEFAULT_CURL_TEST_IMAGE}"
 DEFAULT_ACME_IMAGE="neilpang/acme.sh:latest"
 ACME_IMAGE="${ACME_IMAGE:-$DEFAULT_ACME_IMAGE}"
 
+# --- ACME CA defaults ---
+DEFAULT_ACME_CA="letsencrypt"
+ACME_CA="${ACME_CA:-$DEFAULT_ACME_CA}"
+DEFAULT_ACME_EMAIL=""
+ACME_EMAIL="${ACME_EMAIL:-$DEFAULT_ACME_EMAIL}"
+
 # --- Docker runtime ---
 CONTAINER_NAME="s-ui"
-DOCKER_NETWORK="s-ui"
 DB_TIMEOUT="60"
 DB_POLL_INTERVAL="2"
 
 # --- Terminal color codes (interpreted by printf %b) ---
-COLOR_INFO='\033[0;32m'
-COLOR_WARN='\033[1;33m'
-COLOR_ERROR='\033[0;31m'
-COLOR_RESET='\033[0m'
+if [[ -n "${NO_COLOR:-}" || "${TERM:-}" == "dumb" ]]; then
+    COLOR_INFO=''
+    COLOR_WARN=''
+    COLOR_ERROR=''
+    COLOR_RESET=''
+    COLOR_QUESTION=''
+    COLOR_BANNER=''
+    COLOR_LABEL=''
+else
+    COLOR_INFO='\033[0;32m'
+    COLOR_WARN='\033[1;33m'
+    COLOR_ERROR='\033[0;31m'
+    COLOR_RESET='\033[0m'
+    COLOR_QUESTION='\033[0;36m'
+    COLOR_BANNER='\033[0;36m'
+    COLOR_LABEL='\033[1;37m'
+fi
 
 # --- Runtime state ---
 SCRIPT_ARG0="$(readlink -f "$0")"
 SCRIPT_PATH=""
-PACKAGE_DIR=""
+PACKAGE_DIR="${PACKAGE_DIR:-}"
 CURRENT_COMMAND=""
 COMMAND=""
 AUTO_CONFIRM="0"
@@ -101,4 +118,3 @@ CLI_DOMAIN_SET=""
 INIT_SYSTEM="${INIT_SYSTEM:-$DEFAULT_INIT_SYSTEM}"
 OS_ID="${OS_ID:-$DEFAULT_OS_ID}"
 CONTAINER_STAMP="${CONTAINER_STAMP:-$DEFAULT_CONTAINER_STAMP}"
-INBOUND_PORTS=""

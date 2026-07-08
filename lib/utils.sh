@@ -1,5 +1,4 @@
 # shellcheck shell=bash
-# .editorconfig hint: indent_style = space, indent_size = 4
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Shared utility functions (single source of truth for installed scripts)
 
@@ -182,10 +181,11 @@ assign_config_value() {
                 *) die "Unsupported init_system in config: $value (expected: auto, systemd, openrc, runit, s6, dinit)" ;;
             esac
             ;;
-        inbound_ports)      INBOUND_PORTS="$value" ;;
         sui_image)           SUI_IMAGE="$value" ;;
         curl_test_image)     CURL_TEST_IMAGE="$value" ;;
         acme_image)          ACME_IMAGE="$value" ;;
+        acme_ca)             ACME_CA="$value" ;;
+        acme_email)          ACME_EMAIL="$value" ;;
         container_stamp)     CONTAINER_STAMP="$value" ;;
         package_dir)         PACKAGE_DIR="$value" ;;
         runtime_acme_dir)    RUNTIME_ACME_DIR="$value" ;;
@@ -199,15 +199,20 @@ assign_config_value() {
 # File ownership helper
 # ----------------------------------------------------------------------
 ensure_file_ownership() {
-    [[ "$(id -u)" -eq 0 ]] || return 0
-    log_info "Setting ownership of runtime files to $SUI_CONTROL_USER:$SUI_CONTROL_USER"
-    chown -R "$SUI_CONTROL_USER:$SUI_CONTROL_USER" "$@" 2>/dev/null || true
+    if [[ "$(id -u)" -eq 0 ]]; then
+        log_info "Setting ownership of runtime files to $SUI_CONTROL_USER:$SUI_CONTROL_USER"
+        chown -R "$SUI_CONTROL_USER:$SUI_CONTROL_USER" "$@" 2>/dev/null || true
+    fi
+    chgrp -R "$SUI_CONTROL_USER" "$@" 2>/dev/null || true
+    chmod -R g+w "$@" 2>/dev/null || true
     if [[ -d "$RUNTIME_CERT_DIR" ]]; then
         local _cert_group="$SUI_CONTROL_USER"
         if [[ "$OS_ID" == @(debian|ubuntu) ]] && getent group ssl-cert &>/dev/null; then
             _cert_group="ssl-cert"
         fi
-        chown -R "$SUI_CONTROL_USER:$_cert_group" "$RUNTIME_CERT_DIR" 2>/dev/null || true
+        if [[ "$(id -u)" -eq 0 ]]; then
+            chown -R "$SUI_CONTROL_USER:$_cert_group" "$RUNTIME_CERT_DIR" 2>/dev/null || true
+        fi
         chmod -R g+rX "$RUNTIME_CERT_DIR" 2>/dev/null || true
         chmod -R o-rwx "$RUNTIME_CERT_DIR" 2>/dev/null || true
     fi
@@ -223,8 +228,14 @@ parse_config_file() {
     if [[ -n "$owner_uid" && "$owner_uid" != "0" ]]; then
         local expected_uid
         expected_uid="$(id -u "$SUI_CONTROL_USER" 2>/dev/null || echo '')"
-        [[ -n "$expected_uid" && "$owner_uid" == "$expected_uid" ]] \
-            || die "Config file must be owned by root or $SUI_CONTROL_USER: $config_file"
+        if [[ -z "$expected_uid" || "$owner_uid" != "$expected_uid" ]]; then
+            local file_grp file_mode
+            file_grp="$(stat -c %G "$config_file" 2>/dev/null || true)"
+            file_mode="$(stat -c %a "$config_file" 2>/dev/null || true)"
+            if [[ "$file_grp" != "$SUI_CONTROL_USER" || ${#file_mode} -ne 3 || ${file_mode:1:1} -lt 6 ]]; then
+                die "Config file must be owned by root or $SUI_CONTROL_USER: $config_file"
+            fi
+        fi
     fi
     while IFS= read -r line || [[ -n "$line" ]]; do
         trim_ascii_whitespace line
