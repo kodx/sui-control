@@ -24,7 +24,7 @@ case "$1" in
         chmod g+w /etc/sui-control
         chmod -R g+w /var/lib/sui-control
 
-        if ! groups sui-control >/dev/null 2>&1 | grep -qw docker; then
+        if ! groups sui-control | grep -qw docker; then
             adduser sui-control docker >/dev/null 2>&1 || true
         fi
 
