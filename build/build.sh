@@ -18,6 +18,11 @@ fi
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]] \
     || { echo "ERROR: VERSION does not match semver: $VERSION" >&2; exit 1; }
 
+# Generate a VERSION file at the project root. It is a build artifact (gitignored),
+# derived from the current tag, consumed by the deb packaging
+# (build/debian/sui-control.install) and read by sui-control.sh at runtime.
+printf '%s\n' "$VERSION" > "$PROJECT_DIR/VERSION"
+
 # ---- Helper functions for installer build ------------------------------------
 generate_embed_func() {
     local func_name="$1"
