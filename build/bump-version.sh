@@ -37,8 +37,12 @@ parse_args() {
 get_current_version() {
     local tag
     tag="$(git -C "$PROJECT_DIR" describe --tags --match 'v*' --abbrev=0 2>/dev/null)" || {
-        echo "Error: no git tag matching v* found" >&2
-        exit 1
+        # No tag yet: seed from VERSION file, else start at 0.0.0
+        if [[ -f "$PROJECT_DIR/VERSION" ]]; then
+            tag="v$(cat "$PROJECT_DIR/VERSION")"
+        else
+            tag="v0.0.0"
+        fi
     }
     echo "${tag#v}"
 }
