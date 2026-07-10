@@ -1053,7 +1053,16 @@ bootstrap_installation() {
     check_tcp_port_free "$SUI_SUBSCRIPTION_PORT" || die "Subscription TCP port is already in use: $SUI_SUBSCRIPTION_PORT"
 
     if [[ "$CERT_MODE" == "acme" ]]; then
-        local urls=("https://acme-v02.api.letsencrypt.org/directory" "https://www.google.com/generate_204")
+        local urls=()
+        case "$ACME_CA" in
+            zerossl) urls=("https://acme.zerossl.com/v2/DV90" "https://www.google.com/generate_204") ;;
+            *)       urls=("https://acme-v02.api.letsencrypt.org/directory" "https://www.google.com/generate_204") ;;
+        esac
+        if ! docker image inspect "$CURL_TEST_IMAGE" >/dev/null 2>&1; then
+            log_info "Pulling connectivity test image: $CURL_TEST_IMAGE"
+            docker pull "$CURL_TEST_IMAGE" >/dev/null 2>&1 ||
+                die "Cannot pull connectivity test image $CURL_TEST_IMAGE - Docker Hub is unreachable"
+        fi
         local url connected="0"
         for url in "${urls[@]}"; do
             if docker run --rm "$CURL_TEST_IMAGE" -fsSL --connect-timeout 10 --max-time 20 "$url" >/dev/null 2>&1; then
@@ -1061,7 +1070,7 @@ bootstrap_installation() {
                 break
             fi
         done
-        [[ "$connected" == "1" ]] || die "Docker network connectivity check failed for all test endpoints"
+        [[ "$connected" == "1" ]] || die "ACME endpoint unreachable for all test URLs; cannot issue certificates (check Docker daemon DNS - set 'dns' in /etc/docker/daemon.json if container DNS is broken)"
     fi
 
     mkdir -p "$RUNTIME_BIN_DIR" "$RUNTIME_DATA_DIR" "$RUNTIME_CERT_DIR" "$RUNTIME_ACME_DIR" "$RUNTIME_SYSTEMD_DIR"
