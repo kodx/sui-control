@@ -34,7 +34,7 @@ case "$MODE" in
                     -v "$RUNTIME_CERT_DIR:/certs" \
                     --entrypoint sh \
                     "$ACME_IMAGE" \
-                    -c "set -e; acme.sh --issue --standalone --server letsencrypt --certificate-profile shortlived --days 6 -d '$DOMAIN' --key-file /certs/server.key --fullchain-file /certs/server.crt --home /acme.sh"; then
+                    -c "set -e; acme.sh --issue --standalone --server '$ACME_CA' --certificate-profile shortlived --days 6 -d '$DOMAIN' --key-file /certs/server.key --fullchain-file /certs/server.crt --home /acme.sh"; then
                 log_info "Certificate issued successfully"
             else
                 die "ACME certificate issuance failed"
