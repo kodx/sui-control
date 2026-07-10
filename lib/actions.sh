@@ -198,6 +198,14 @@ generate_random_port() {
     printf '%s\n' $((num % range + min))
 }
 
+generate_free_random_port() {
+    local min="$1" max="$2" p
+    while true; do
+        p="$(generate_random_port "$min" "$max")"
+        check_tcp_port_free "$p" && { printf '%s\n' "$p"; return; }
+    done
+}
+
 _randomize_if_default() {
     local -n _rnd_ref="$1"
     local default_val="$2" flag_name="$3" exclude="$4"
@@ -1028,8 +1036,8 @@ setup_sui_user() {
 # ----------------------------------------------------------------------
 bootstrap_installation() {
     setup_sui_user
-    _randomize_if_default SUI_PANEL_PORT "$DEFAULT_SUI_PANEL_PORT" CLI_PANEL_PORT_SET "" generate_random_port 20000 40000
-    _randomize_if_default SUI_SUBSCRIPTION_PORT "$DEFAULT_SUI_SUBSCRIPTION_PORT" CLI_SUBSCRIPTION_PORT_SET "$SUI_PANEL_PORT" generate_random_port 20000 40000
+    _randomize_if_default SUI_PANEL_PORT "$DEFAULT_SUI_PANEL_PORT" CLI_PANEL_PORT_SET "" generate_free_random_port 20000 40000
+    _randomize_if_default SUI_SUBSCRIPTION_PORT "$DEFAULT_SUI_SUBSCRIPTION_PORT" CLI_SUBSCRIPTION_PORT_SET "$SUI_PANEL_PORT" generate_free_random_port 20000 40000
     _randomize_if_default SUI_PANEL_PATH "$DEFAULT_SUI_PANEL_PATH" CLI_PANEL_PATH_SET "" generate_random_path_segment
     _randomize_if_default SUI_SUBSCRIPTION_PATH "$DEFAULT_SUI_SUBSCRIPTION_PATH" CLI_SUBSCRIPTION_PATH_SET "$SUI_PANEL_PATH" generate_random_path_segment
 
