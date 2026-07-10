@@ -59,7 +59,7 @@ jobs:
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: ../sui-control_${{ steps.deb_build.outputs.version }}_all.deb
+          file: build/artifacts/sui-control_${{ steps.deb_build.outputs.version }}_all.deb
           asset_name: sui-control_${{ steps.deb_build.outputs.version }}_all.deb
           tag: ${{ steps.version.outputs.tag }}
           overwrite: true
