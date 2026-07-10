@@ -4,6 +4,23 @@
 # Install-only functions — not deployed to target
 
 # ----------------------------------------------------------------------
+# Write a generated file to disk by invoking a generator function.
+# Usage: create_generated_file <dest_dir> <rel_path> <generator_func> <mode> <label>
+# ----------------------------------------------------------------------
+create_generated_file() {
+    local dest_dir="$1" rel_path="$2" generator="$3" mode="$4" label="$5"
+    local target_dir="$dest_dir"
+    [[ "$rel_path" == */* ]] && target_dir="$dest_dir/${rel_path%/*}"
+    mkdir -p "$target_dir"
+    if "$generator" > "$dest_dir/$rel_path"; then
+        chmod "$mode" "$dest_dir/$rel_path"
+        log_info "Wrote $label -> $dest_dir/$rel_path"
+    else
+        die "Failed to generate $label"
+    fi
+}
+
+# ----------------------------------------------------------------------
 # Installer help
 # ----------------------------------------------------------------------
 show_install_help() {
