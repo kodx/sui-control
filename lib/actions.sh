@@ -38,19 +38,32 @@ validate_domain() {
     done
 }
 
+is_valid_port() {
+    local label="$1" port="$2"
+    [[ "$port" =~ ^[0-9]+$ ]] || { log_warn "$label must be a number: $port"; return 1; }
+    ((port >= 1 && port <= 65535)) || { log_warn "$label must be between 1 and 65535: $port"; return 1; }
+    return 0
+}
+
 validate_port() {
     local label="$1" port="$2"
-    [[ "$port" =~ ^[0-9]+$ ]] || die "$label must be a number: $port"
-    ((port >= 1 && port <= 65535)) || die "$label must be between 1 and 65535: $port"
+    is_valid_port "$label" "$port" || die "$label must be a number: $port"
+}
+
+is_valid_url_path_segment() {
+    local label="$1" value="$2"
+    [[ -n "$value" ]] || { log_warn "$label must not be empty"; return 1; }
+    [[ "$value" != /* ]] || { log_warn "$label must not start with slash: $value"; return 1; }
+    [[ "$value" != */ ]] || { log_warn "$label must not end with slash: $value"; return 1; }
+    [[ "$value" != *"//"* ]] || { log_warn "$label must not contain double slash: $value"; return 1; }
+    [[ "$value" =~ ^[A-Za-z0-9._~-]+(/[A-Za-z0-9._~-]+)*$ ]] || {
+        log_warn "$label contains unsupported characters: $value"; return 1; }
+    return 0
 }
 
 validate_url_path_segment() {
     local label="$1" value="$2"
-    [[ -n "$value" ]] || die "$label must not be empty"
-    [[ "$value" != /* ]] || die "$label must not start with slash: $value"
-    [[ "$value" != */ ]] || die "$label must not end with slash: $value"
-    [[ "$value" != *"//"* ]] || die "$label must not contain double slash: $value"
-    [[ "$value" =~ ^[A-Za-z0-9._~-]+(/[A-Za-z0-9._~-]+)*$ ]] ||
+    is_valid_url_path_segment "$label" "$value" ||
         die "$label contains unsupported characters: $value"
 }
 
@@ -333,37 +346,25 @@ run_interactive_config_menu() {
             printf "%bPanel port [$panel_port]: %b" "$COLOR_QUESTION" "$COLOR_RESET" >&2
             read -r ans
             panel_port="${ans:-$panel_port}"
-            validate_port "Panel port" "$panel_port" || {
-                log_warn "Invalid port"
-                continue
-            }
+            is_valid_port "Panel port" "$panel_port" || { log_warn "Invalid port"; continue; }
             ;;
         6)
             printf "%bSubscription port [$sub_port]: %b" "$COLOR_QUESTION" "$COLOR_RESET" >&2
             read -r ans
             sub_port="${ans:-$sub_port}"
-            validate_port "Subscription port" "$sub_port" || {
-                log_warn "Invalid port"
-                continue
-            }
+            is_valid_port "Subscription port" "$sub_port" || { log_warn "Invalid port"; continue; }
             ;;
         7)
             printf "%bPanel path [$panel_path]: %b" "$COLOR_QUESTION" "$COLOR_RESET" >&2
             read -r ans
             panel_path="${ans:-$panel_path}"
-            validate_url_path_segment "Panel path" "$panel_path" || {
-                log_warn "Invalid path"
-                continue
-            }
+            is_valid_url_path_segment "Panel path" "$panel_path" || { log_warn "Invalid path"; continue; }
             ;;
         8)
             printf "%bSubscription path [$sub_path]: %b" "$COLOR_QUESTION" "$COLOR_RESET" >&2
             read -r ans
             sub_path="${ans:-$sub_path}"
-            validate_url_path_segment "Subscription path" "$sub_path" || {
-                log_warn "Invalid path"
-                continue
-            }
+            is_valid_url_path_segment "Subscription path" "$sub_path" || { log_warn "Invalid path"; continue; }
             ;;
         9)
             printf "%bTimezone [$tz]: %b" "$COLOR_QUESTION" "$COLOR_RESET" >&2
